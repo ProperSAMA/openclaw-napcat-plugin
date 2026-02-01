@@ -104,12 +104,21 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         return true;
                     }
 
-                    // Check for CQ:at mention in raw_message
-                    // Format: [CQ:at,qq={botId}] or [CQ:at,qq=all]
-                    const mentionPattern = new RegExp(`\\[CQ:at,qq=${botId}\\]`, 'i');
-                    const allMentionPattern = /\[CQ:at,qq=all\]/i;
+                    // Check for bot mention in raw_message
+                    // Support two formats:
+                    // 1. CQ code format: [CQ:at,qq={botId}] or [CQ:at,qq=all]
+                    // 2. Plain text format: @Nickname (botId) or @botId
+                    const mentionPatternCQ = new RegExp(`\\[CQ:at,qq=${botId}\\]`, 'i');
+                    const allMentionPatternCQ = /\[CQ:at,qq=all\]/i;
+                    
+                    // Plain text mention patterns: @xxx (123456) or @123456
+                    const mentionPatternPlain1 = new RegExp(`@[^\\s]+ \\(${botId}\\)`, 'i');
+                    const mentionPatternPlain2 = new RegExp(`@${botId}(?:\\s|$|,)`, 'i');
 
-                    if (!mentionPattern.test(text) && !allMentionPattern.test(text)) {
+                    const isMentionedCQ = mentionPatternCQ.test(text) || allMentionPatternCQ.test(text);
+                    const isMentionedPlain = mentionPatternPlain1.test(text) || mentionPatternPlain2.test(text);
+
+                    if (!isMentionedCQ && !isMentionedPlain) {
                         console.log(`[NapCat] Ignoring group message (bot not mentioned)`);
                         res.statusCode = 200;
                         res.setHeader("Content-Type", "application/json");
