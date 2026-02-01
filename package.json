@@ -1,0 +1,10 @@
+{
+  "name": "@openclaw/napcat",
+  "version": "1.0.0",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
