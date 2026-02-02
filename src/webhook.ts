@@ -64,7 +64,8 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             const config = getNapCatConfig();
             const isGroup = body.message_type === "group";
             const senderId = String(body.user_id);
-            const text = body.raw_message || "";
+            const rawText = body.raw_message || "";
+            let text = rawText;
 
             // Get allowUsers from config
             const allowUsers = config.allowUsers || [];
@@ -81,6 +82,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             // Group message handling
             const enableGroupMessages = config.enableGroupMessages || false;
             const groupMentionOnly = config.groupMentionOnly !== false; // Default true
+            let wasMentioned = !isGroup; // In DMs, we consider it "mentioned"
 
             if (isGroup) {
                 if (!enableGroupMessages) {
@@ -92,10 +94,10 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                     return true;
                 }
 
+                const botId = body.self_id || config.selfId;
                 if (groupMentionOnly) {
                     // Check if bot was mentioned
                     // NapCat sends self_id as the bot's QQ number
-                    const botId = body.self_id || config.selfId;
                     if (!botId) {
                         console.log(`[NapCat] Cannot determine bot ID, ignoring group message`);
                         res.statusCode = 200;
@@ -126,7 +128,27 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         return true;
                     }
 
+                    wasMentioned = true;
                     console.log(`[NapCat] Bot mentioned in group, processing message`);
+                } else {
+                    // Check for mention anyway to update wasMentioned
+                    if (botId) {
+                        const mentionPatternCQ = new RegExp(`\\[CQ:at,qq=${botId}\\]`, 'i');
+                        const allMentionPatternCQ = /\[CQ:at,qq=all\]/i;
+                        const mentionPatternPlain1 = new RegExp(`@[^\\s]+ \\(${botId}\\)`, 'i');
+                        const mentionPatternPlain2 = new RegExp(`@${botId}(?:\\s|$|,)`, 'i');
+                        wasMentioned = mentionPatternCQ.test(text) || allMentionPatternCQ.test(text) || 
+                                       mentionPatternPlain1.test(text) || mentionPatternPlain2.test(text);
+                    }
+                }
+
+                // Strip mentions from text for cleaner processing and command detection
+                if (botId) {
+                    const stripCQ = new RegExp(`^\\[CQ:at,qq=${botId}\\]\\s*`, 'i');
+                    const stripAll = /^\[CQ:at,qq=all\]\s*/i;
+                    const stripPlain1 = new RegExp(`^@[^\\s]+ \\(${botId}\\)\\s*`, 'i');
+                    const stripPlain2 = new RegExp(`^@${botId}(?:\\s|$|,)\\s*`, 'i');
+                    text = text.replace(stripCQ, '').replace(stripAll, '').replace(stripPlain1, '').replace(stripPlain2, '').trim();
                 }
             }
 
@@ -161,7 +183,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             const cfg = runtime.config?.loadConfig?.() || {};
             const ctxPayload = {
                 Body: text,
-                RawBody: text,
+                RawBody: rawText,
                 CommandBody: text,
                 From: `napcat:${conversationId}`,
                 To: "me",
@@ -174,7 +196,8 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                 Provider: "napcat",
                 Surface: "napcat",
                 MessageSid: messageId,
-                WasMentioned: groupMentionOnly && isGroup, // Mark as mentioned if from group
+                WasMentioned: wasMentioned,
+                CommandAuthorized: true,
                 OriginatingChannel: "napcat",
                 OriginatingTo: conversationId,
             };
