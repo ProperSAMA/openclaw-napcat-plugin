@@ -1,6 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getNapCatRuntime, getNapCatConfig } from "./runtime.js";
 
+// Group name cache removed
+
+
 // Simple function to send message via NapCat API
 async function sendToNapCat(url: string, payload: any) {
     const res = await fetch(url, {
@@ -63,16 +66,51 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             const runtime = getNapCatRuntime();
             const config = getNapCatConfig();
             const isGroup = body.message_type === "group";
+            // Ensure senderId is numeric string
             const senderId = String(body.user_id);
+            // Safety check: if senderId looks like a name (non-numeric), log warning
+            if (!/^\d+$/.test(senderId)) {
+                console.warn(`[NapCat] WARNING: user_id is not numeric: ${senderId}`);
+            }
             const rawText = body.raw_message || "";
             let text = rawText;
 
             // Get allowUsers from config
             const allowUsers = config.allowUsers || [];
+            const isAllowUser = allowUsers.includes(senderId);
 
-            // Check allowlist (if configured)
-            if (allowUsers.length > 0 && !allowUsers.includes(senderId)) {
-                console.log(`[NapCat] Ignoring message from ${senderId} (not in allowlist)`);
+            // Check allowlist for non-group messages or group messages
+            // For groups, we allow processing if:
+            // 1. Sender is an allowUser (can interact directly)
+            // 2. Or sender is allowUser and explicitly asking to check someone else's message
+            let shouldProcess = isAllowUser;
+            let processOtherUserId: string | null = null;
+
+            if (isGroup && !isAllowUser) {
+                // Check if an allowUser is asking us to check another user's message
+                // Pattern: allowUser says "你看一下XXX的消息" or "帮XXX一个问题"
+                const allowUserMentionPattern = /@(?:anyone|all|\d+)\s*(?:你看一下|看看|处理一下|回复一下)\s*(?:.+的)?(?:消息|问题|发言)/i;
+                
+                // Look for allowUsers in recent context or check if this message references them
+                // For now, we'll implement a simpler approach:
+                // If this is a reply to/forward of an allowUser's message mentioning "你看一下"
+                // Simplified: check if message contains "你看一下" and references another user
+                const checkPattern = /(?:你看一下|看看|处理一下|回复一下)\s*(?:.+的)?(?:消息|问题|发言|内容)/i;
+                if (checkPattern.test(text)) {
+                    // Extract referenced user ID (CQ at code or plain text)
+                    const atPattern = /\[CQ:at,qq=(\d+)\]/;
+                    const atMatch = text.match(atPattern);
+                    if (atMatch && atMatch[1]) {
+                        processOtherUserId = atMatch[1];
+                        shouldProcess = true;
+                        console.log(`[NapCat] allowUser request to check user ${processOtherUserId}'s message`);
+                    }
+                }
+            }
+
+            if (allowUsers.length > 0 && !shouldProcess && !isGroup) {
+                // For direct messages, still require allowlist if configured
+                console.log(`[NapCat] Ignoring DM from ${senderId} (not in allowlist)`);
                 res.statusCode = 200;
                 res.setHeader("Content-Type", "application/json");
                 res.end('{"status":"ok"}');
@@ -158,10 +196,20 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             const conversationId = isGroup ? `group:${body.group_id}` : `private:${senderId}`;
             const senderName = body.sender?.nickname || senderId;
 
-            // Log for debugging
-            console.log(`[NapCat] Inbound from ${senderId} (conv: ${conversationId}): ${text.substring(0, 50)}...`);
+            // Generate session key based on conversation type
+            // Session format: session:napcat:private:{userId} or session:napcat:group:{groupId}
+            const sessionKey = isGroup 
+                ? `session:napcat:group:${body.group_id}`
+                : `session:napcat:private:${senderId}`;
 
-            // Resolve route for this message
+            // User requested to use session key as display name for consistency
+            const sessionDisplayName = sessionKey;
+
+            // Log for debugging
+            console.log(`[NapCat] Inbound from ${senderId} (session: ${sessionKey}): ${text.substring(0, 50)}...`);
+
+            // Resolve route for this message with specific session key
+            // Note: OpenClaw SDK ignores the sessionKey param, so we must override it after
             const route = await runtime.channel.routing.resolveAgentRoute({
                 channel: "napcat",
                 conversationId,
@@ -179,6 +227,9 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                 return true;
             }
 
+            // Force our custom session key (OpenClaw SDK doesn't respect the sessionKey param)
+            route.sessionKey = sessionKey;
+
             // Build ctxPayload using runtime methods
             const cfg = runtime.config?.loadConfig?.() || {};
             const ctxPayload = {
@@ -187,10 +238,17 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                 CommandBody: text,
                 From: `napcat:${conversationId}`,
                 To: "me",
-                SessionKey: route.sessionKey,
+                SessionKey: sessionKey,  // Use our custom session key
+                SessionDisplayName: sessionDisplayName,
+                displayName: sessionDisplayName,
+                name: sessionDisplayName,
+                Title: sessionDisplayName,
+                ConversationTitle: sessionDisplayName,
+                Topic: sessionDisplayName,
+                Subject: sessionDisplayName,
                 AccountId: route.accountId,
                 ChatType: isGroup ? "group" : "direct",
-                ConversationLabel: senderName,
+                ConversationLabel: sessionKey,
                 SenderName: senderName,
                 SenderId: senderId,
                 Provider: "napcat",
