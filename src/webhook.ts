@@ -79,38 +79,11 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             const allowUsers = config.allowUsers || [];
             const isAllowUser = allowUsers.includes(senderId);
 
-            // Check allowlist for non-group messages or group messages
-            // For groups, we allow processing if:
-            // 1. Sender is an allowUser (can interact directly)
-            // 2. Or sender is allowUser and explicitly asking to check someone else's message
-            let shouldProcess = isAllowUser;
-            let processOtherUserId: string | null = null;
-
-            if (isGroup && !isAllowUser) {
-                // Check if an allowUser is asking us to check another user's message
-                // Pattern: allowUser says "你看一下XXX的消息" or "帮XXX一个问题"
-                const allowUserMentionPattern = /@(?:anyone|all|\d+)\s*(?:你看一下|看看|处理一下|回复一下)\s*(?:.+的)?(?:消息|问题|发言)/i;
-                
-                // Look for allowUsers in recent context or check if this message references them
-                // For now, we'll implement a simpler approach:
-                // If this is a reply to/forward of an allowUser's message mentioning "你看一下"
-                // Simplified: check if message contains "你看一下" and references another user
-                const checkPattern = /(?:你看一下|看看|处理一下|回复一下)\s*(?:.+的)?(?:消息|问题|发言|内容)/i;
-                if (checkPattern.test(text)) {
-                    // Extract referenced user ID (CQ at code or plain text)
-                    const atPattern = /\[CQ:at,qq=(\d+)\]/;
-                    const atMatch = text.match(atPattern);
-                    if (atMatch && atMatch[1]) {
-                        processOtherUserId = atMatch[1];
-                        shouldProcess = true;
-                        console.log(`[NapCat] allowUser request to check user ${processOtherUserId}'s message`);
-                    }
-                }
-            }
-
-            if (allowUsers.length > 0 && !shouldProcess && !isGroup) {
-                // For direct messages, still require allowlist if configured
-                console.log(`[NapCat] Ignoring DM from ${senderId} (not in allowlist)`);
+            // Check allowlist logic
+            // If allowUsers is configured, only listed users should trigger the bot.
+            // This applies to both DMs and Group chats.
+            if (allowUsers.length > 0 && !isAllowUser) {
+                console.log(`[NapCat] Ignoring message from ${senderId} (not in allowlist)`);
                 res.statusCode = 200;
                 res.setHeader("Content-Type", "application/json");
                 res.end('{"status":"ok"}');
