@@ -82,6 +82,9 @@ export const napcatPlugin = {
             } else if (to.startsWith("session:napcat:private:")) {
                 targetType = "private";
                 targetId = to.replace("session:napcat:private:", "");
+            } else if (to.startsWith("session:napcat:group:")) {
+                targetType = "group";
+                targetId = to.replace("session:napcat:group:", "");
             }
 
             // Fallback for direct user input of ID
@@ -120,6 +123,9 @@ export const napcatPlugin = {
             } else if (to.startsWith("session:napcat:private:")) {
                 targetType = "private";
                 targetId = to.replace("session:napcat:private:", "");
+            } else if (to.startsWith("session:napcat:group:")) {
+                targetType = "group";
+                targetId = to.replace("session:napcat:group:", "");
             }
 
             const endpoint = targetType === "group" ? "/send_group_msg" : "/send_private_msg";
