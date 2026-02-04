@@ -103,7 +103,48 @@ export const napcatPlugin = {
             } catch (err: any) {
                 return { ok: false, error: err.message };
             }
-        }
+        },
+        sendMedia: async ({ to, text, mediaUrl, cfg }: any) => {
+            const config = cfg.channels?.napcat || {};
+            const baseUrl = config.url || "http://127.0.0.1:3000";
+
+            let targetType = "private";
+            let targetId = to;
+
+            if (to.startsWith("group:")) {
+                targetType = "group";
+                targetId = to.replace("group:", "");
+            } else if (to.startsWith("private:")) {
+                targetType = "private";
+                targetId = to.replace("private:", "");
+            } else if (to.startsWith("session:napcat:private:")) {
+                targetType = "private";
+                targetId = to.replace("session:napcat:private:", "");
+            }
+
+            const endpoint = targetType === "group" ? "/send_group_msg" : "/send_private_msg";
+
+            // Basic media support: try CQ image format, fallback to plain URL.
+            const mediaMessage = mediaUrl
+                ? `[CQ:image,file=${mediaUrl}]`
+                : "";
+            const message = text
+                ? (mediaMessage ? `${text}\n${mediaMessage}` : text)
+                : (mediaMessage || "");
+
+            const payload: any = { message };
+            if (targetType === "group") payload.group_id = targetId;
+            else payload.user_id = targetId;
+
+            console.log(`[NapCat] Sending media to ${targetType} ${targetId}: ${message}`);
+
+            try {
+                const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload);
+                return { ok: true, result };
+            } catch (err: any) {
+                return { ok: false, error: err.message };
+            }
+        },
     },
     gateway: {
         startAccount: async () => {

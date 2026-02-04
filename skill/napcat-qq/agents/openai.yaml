@@ -1,0 +1,4 @@
+interface:
+  display_name: "Napcat QQ"
+  short_description: "QQ 消息仅走 napcat 插件并规范 sessionKey"
+  default_prompt: "使用 $napcat-qq 发送 QQ 私聊或群消息，并按规则生成 sessionKey。调用 message 工具时必须显式指定 channel=napcat。"
