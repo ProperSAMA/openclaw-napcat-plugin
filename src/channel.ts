@@ -79,6 +79,9 @@ export const napcatPlugin = {
             } else if (to.startsWith("private:")) {
                 targetType = "private";
                 targetId = to.replace("private:", "");
+            } else if (to.startsWith("session:napcat:private:")) {
+                targetType = "private";
+                targetId = to.replace("session:napcat:private:", "");
             }
 
             // Fallback for direct user input of ID
