@@ -9,6 +9,8 @@ QQ 聊天通道插件 for OpenClaw，基于 NapCat (OneBot 11) 实现。
 
 - ✅ 接收私聊和群组消息
 - ✅ 支持文本消息收发
+- ✅ 支持群聊/私聊 sessionKey 路由
+- ✅ 支持图片等媒体发送（CQ:image）
 - ✅ 可配置的接收用户白名单
 - ✅ 完整的消息路由和会话管理
 - ✅ 与 OpenClaw 无缝集成
@@ -29,7 +31,7 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git /opt/homebrew
 {
   "channels": {
     "napcat": {
-      "url": "http://127.0.0.1:4000",
+      "url": "http://127.0.0.1:3000",
       "allowUsers": ["你的QQ号"]
     }
   },
@@ -47,7 +49,7 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git /opt/homebrew
 
 | 配置项 | 类型 | 说明 | 默认值 |
 |--------|------|------|--------|
-| `url` | string | NapCat HTTP 服务地址 | `http://127.0.0.1:4000` |
+| `url` | string | NapCat HTTP 服务地址 | `http://127.0.0.1:3000` |
 | `allowUsers` | string[] | 允许接收消息的 QQ 用户 ID 列表 | `[]` (接收所有) |
 | `enableGroupMessages` | boolean | 是否处理群消息 | `false` |
 | `groupMentionOnly` | boolean | 群消息是否需要 @ 机器人 | `true` |
@@ -58,7 +60,7 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git /opt/homebrew
 {
   "channels": {
     "napcat": {
-      "url": "http://127.0.0.1:4000",
+      "url": "http://127.0.0.1:3000",
       "allowUsers": ["你的QQ号"],
       "enableGroupMessages": true,
       "groupMentionOnly": true
@@ -85,6 +87,26 @@ Http 客户端
 - 消息格式: String
 
 如果 OpenClaw 运行在不同的机器上，请在 Http 客户端中使用实际 IP 地址。
+
+## 发送消息说明
+
+为了确保正确路由，请明确指定 `channel: "napcat"`，并使用以下目标格式：
+
+私聊目标
+- `private:<QQ号>`
+- `session:napcat:private:<QQ号>`
+
+群聊目标
+- `group:<群号>`
+- `session:napcat:group:<群号>`
+
+注意：纯数字 `target` 会被当作私聊用户 ID，群聊请务必加上 `group:` 或 `session:napcat:group:` 前缀。
+
+## Skill（napcat-qq）
+
+本仓库包含 Codex Skill：`skill/napcat-qq`，用于强制使用本插件发送 QQ 消息并规范 sessionKey。
+
+安装后可在提示词中使用 `$napcat-qq`，并确保消息调用显式设置 `channel=napcat`。
 
 ### 查看日志
 

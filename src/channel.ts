@@ -22,7 +22,8 @@ export const napcatPlugin = {
     },
     capabilities: {
         chatTypes: ["direct", "group"],
-        text: true
+        text: true,
+        media: true
     },
     configSchema: {
         type: "object",
