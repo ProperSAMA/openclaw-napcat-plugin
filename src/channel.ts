@@ -24,6 +24,33 @@ function buildMediaProxyUrl(mediaUrl: string, config: any): string {
     return `${baseUrl}/napcat/media?${query.toString()}`;
 }
 
+function normalizeNapCatTarget(raw: string): string {
+    const trimmed = raw.trim();
+    if (!trimmed) return trimmed;
+    const withoutProvider = trimmed.replace(/^napcat:/i, "");
+    const sessionMatch = withoutProvider.match(/^session:napcat:(private|group):(\d+)$/i);
+    if (sessionMatch) {
+        return `session:napcat:${sessionMatch[1].toLowerCase()}:${sessionMatch[2]}`;
+    }
+    const directMatch = withoutProvider.match(/^(private|group):(\d+)$/i);
+    if (directMatch) {
+        return `${directMatch[1].toLowerCase()}:${directMatch[2]}`;
+    }
+    if (/^\d+$/.test(withoutProvider)) {
+        return withoutProvider;
+    }
+    return withoutProvider.toLowerCase();
+}
+
+function looksLikeNapCatTargetId(raw: string, normalized?: string): boolean {
+    const target = (normalized || raw).trim();
+    return (
+        /^session:napcat:(private|group):\d+$/i.test(target) ||
+        /^(private|group):\d+$/i.test(target) ||
+        /^\d+$/.test(target)
+    );
+}
+
 export const napcatPlugin = {
     id: "napcat",
     meta: {
@@ -35,6 +62,13 @@ export const napcatPlugin = {
         chatTypes: ["direct", "group"],
         text: true,
         media: true
+    },
+    messaging: {
+        normalizeTarget: normalizeNapCatTarget,
+        targetResolver: {
+            looksLikeId: looksLikeNapCatTargetId,
+            hint: "private:<QQ号> / group:<群号> / session:napcat:private:<QQ号> / session:napcat:group:<群号>"
+        }
     },
     configSchema: {
         type: "object",
