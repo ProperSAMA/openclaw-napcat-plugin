@@ -167,11 +167,25 @@ async function readBody(req: IncomingMessage): Promise<any> {
         req.on("data", chunk => data += chunk);
         req.on("end", () => {
             try {
-                if (!data) resolve({});
-                else resolve(JSON.parse(data));
+                if (!data) {
+                    resolve({});
+                    return;
+                }
+                resolve(JSON.parse(data));
             } catch (e) {
                 console.error("NapCat JSON Parse Error:", e);
-                resolve({});
+                // Some deployments send form-urlencoded bodies with nested JSON payload.
+                try {
+                    const params = new URLSearchParams(data);
+                    const wrapped = params.get("payload") || params.get("data") || params.get("message");
+                    if (wrapped) {
+                        resolve(JSON.parse(wrapped));
+                        return;
+                    }
+                } catch {
+                    // Fall through and preserve raw body for diagnostics.
+                }
+                resolve({ __raw: data, __parseError: true });
             }
         });
         req.on("error", reject);
@@ -196,7 +210,7 @@ function getInboundLogFilePath(body: any, config: any): string {
 
 async function logInboundMessage(body: any, config: any): Promise<void> {
     if (config.enableInboundLogging === false) return;
-    if (body?.post_type !== "message") return;
+    if (body?.post_type !== "message" && body?.post_type !== "message_sent") return;
 
     const filePath = getInboundLogFilePath(body, config);
     const line = JSON.stringify({
@@ -213,6 +227,30 @@ async function logInboundMessage(body: any, config: any): Promise<void> {
 
     await mkdir(dirname(filePath), { recursive: true });
     await appendFile(filePath, line, "utf8");
+}
+
+async function logInboundParseFailure(rawBody: string, config: any): Promise<void> {
+    if (config.enableInboundLogging === false) return;
+    const baseDirRaw = String(config.inboundLogDir || "./logs/napcat-inbound").trim() || "./logs/napcat-inbound";
+    const filePath = resolve(baseDirRaw, "parse-error.log");
+    const line = JSON.stringify({
+        ts: new Date().toISOString(),
+        kind: "parse_error",
+        raw_body: rawBody,
+    }) + "\n";
+    await mkdir(dirname(filePath), { recursive: true });
+    await appendFile(filePath, line, "utf8");
+}
+
+function extractNapCatEvents(body: any): any[] {
+    if (!body || typeof body !== "object") return [];
+    if (Array.isArray(body)) return body.filter((item) => item && typeof item === "object");
+    if (body.post_type) return [body];
+    if (Array.isArray(body.events)) return body.events.filter((item: any) => item && typeof item === "object");
+    if (Array.isArray(body.data)) return body.data.filter((item: any) => item && typeof item === "object");
+    if (body.data && typeof body.data === "object") return [body.data];
+    if (body.payload && typeof body.payload === "object") return [body.payload];
+    return [];
 }
 
 export async function handleNapCatWebhook(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
@@ -239,31 +277,39 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
     try {
         const body = await readBody(req);
         const config = getNapCatConfig();
+        const events = extractNapCatEvents(body);
 
         try {
-            await logInboundMessage(body, config);
+            if (body?.__parseError && typeof body.__raw === "string" && body.__raw.trim()) {
+                await logInboundParseFailure(body.__raw, config);
+            }
+            for (const event of events) {
+                await logInboundMessage(event, config);
+            }
         } catch (err) {
             console.error("[NapCat] Failed to write inbound log:", err);
         }
 
+        const event = events[0] || body;
+
         // Heartbeat / Lifecycle
-        if (body.post_type === "meta_event") {
+        if (event.post_type === "meta_event") {
             res.statusCode = 200;
             res.setHeader("Content-Type", "application/json");
             res.end('{"status":"ok"}');
             return true;
         }
 
-        if (body.post_type === "message") {
+        if (event.post_type === "message") {
             const runtime = getNapCatRuntime();
-            const isGroup = body.message_type === "group";
+            const isGroup = event.message_type === "group";
             // Ensure senderId is numeric string
-            const senderId = String(body.user_id);
+            const senderId = String(event.user_id);
             // Safety check: if senderId looks like a name (non-numeric), log warning
             if (!/^\d+$/.test(senderId)) {
                 console.warn(`[NapCat] WARNING: user_id is not numeric: ${senderId}`);
             }
-            const rawText = body.raw_message || "";
+            const rawText = event.raw_message || "";
             let text = rawText;
 
             // Get allowUsers from config
@@ -296,7 +342,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                     return true;
                 }
 
-                const botId = body.self_id || config.selfId;
+                const botId = event.self_id || config.selfId;
                 if (groupMentionOnly) {
                     // Check if bot was mentioned
                     // NapCat sends self_id as the bot's QQ number
@@ -354,16 +400,16 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                 }
             }
 
-            const messageId = String(body.message_id);
+            const messageId = String(event.message_id);
             // OpenClaw convention: conversationId differentiates chats
             // We prefix with type to help outbound routing
-            const conversationId = isGroup ? `group:${body.group_id}` : `private:${senderId}`;
-            const senderName = body.sender?.nickname || senderId;
+            const conversationId = isGroup ? `group:${event.group_id}` : `private:${senderId}`;
+            const senderName = event.sender?.nickname || senderId;
 
             // Generate session key based on conversation type
             // Session format: session:napcat:private:{userId} or session:napcat:group:{groupId}
             const sessionKey = isGroup 
-                ? `session:napcat:group:${body.group_id}`
+                ? `session:napcat:group:${event.group_id}`
                 : `session:napcat:private:${senderId}`;
 
             // User requested to use session key as display name for consistency
