@@ -138,6 +138,18 @@ export const napcatPlugin = {
                 title: "Voice Base Path",
                 description: "Base directory for relative audio files (e.g. /tmp/napcat-voice)",
                 default: ""
+            },
+            enableInboundLogging: {
+                type: "boolean",
+                title: "Enable Inbound Message Logging",
+                description: "Log all received QQ/group messages before allowlist filtering",
+                default: true
+            },
+            inboundLogDir: {
+                type: "string",
+                title: "Inbound Log Directory",
+                description: "Directory to store per-user/per-group inbound logs",
+                default: "./logs/napcat-inbound"
             }
         }
     },

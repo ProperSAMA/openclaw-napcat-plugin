@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
-import { extname } from "node:path";
+import { appendFile, mkdir, stat } from "node:fs/promises";
+import { dirname, extname, resolve } from "node:path";
 import { getNapCatRuntime, getNapCatConfig } from "./runtime.js";
 
 // Group name cache removed
@@ -178,6 +178,43 @@ async function readBody(req: IncomingMessage): Promise<any> {
     });
 }
 
+function sanitizeLogToken(raw: string): string {
+    return String(raw || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function getInboundLogFilePath(body: any, config: any): string {
+    const isGroup = body?.message_type === "group";
+    const baseDirRaw = String(config.inboundLogDir || "./logs/napcat-inbound").trim() || "./logs/napcat-inbound";
+    const baseDir = resolve(baseDirRaw);
+    if (isGroup) {
+        const groupId = sanitizeLogToken(String(body?.group_id || "unknown_group"));
+        return resolve(baseDir, `group-${groupId}.log`);
+    }
+    const userId = sanitizeLogToken(String(body?.user_id || "unknown_user"));
+    return resolve(baseDir, `qq-${userId}.log`);
+}
+
+async function logInboundMessage(body: any, config: any): Promise<void> {
+    if (config.enableInboundLogging === false) return;
+    if (body?.post_type !== "message") return;
+
+    const filePath = getInboundLogFilePath(body, config);
+    const line = JSON.stringify({
+        ts: new Date().toISOString(),
+        post_type: body.post_type,
+        message_type: body.message_type,
+        self_id: body.self_id,
+        user_id: body.user_id,
+        group_id: body.group_id,
+        message_id: body.message_id,
+        raw_message: body.raw_message || "",
+        sender: body.sender || {},
+    }) + "\n";
+
+    await mkdir(dirname(filePath), { recursive: true });
+    await appendFile(filePath, line, "utf8");
+}
+
 export async function handleNapCatWebhook(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     const url = req.url || "";
     const method = req.method || "UNKNOWN";
@@ -201,6 +238,13 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
 
     try {
         const body = await readBody(req);
+        const config = getNapCatConfig();
+
+        try {
+            await logInboundMessage(body, config);
+        } catch (err) {
+            console.error("[NapCat] Failed to write inbound log:", err);
+        }
 
         // Heartbeat / Lifecycle
         if (body.post_type === "meta_event") {
@@ -212,7 +256,6 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
 
         if (body.post_type === "message") {
             const runtime = getNapCatRuntime();
-            const config = getNapCatConfig();
             const isGroup = body.message_type === "group";
             // Ensure senderId is numeric string
             const senderId = String(body.user_id);
