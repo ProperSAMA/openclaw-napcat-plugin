@@ -5,10 +5,6 @@
 QQ 聊天通道插件 for OpenClaw，基于 NapCat (OneBot 11) 实现。
 部署完毕后，可通过 QQ 与 OpenClaw 对话、下达指令
 
-## 注意
-
-更新 Openclaw 后需要重新安装插件
-
 ## 功能特性
 
 - ✅ 接收私聊和群组消息
@@ -21,11 +17,14 @@ QQ 聊天通道插件 for OpenClaw，基于 NapCat (OneBot 11) 实现。
 
 ## 安装方法
 
-暂未上架至 ClawdHub，请克隆插件仓库到 OpenClaw 扩展目录
-
+1. clone 或直接下载 zip，记住路径
 ```bash
-git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git /opt/homebrew/lib/node_modules/openclaw/extensions/napcat
+git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
 ```
+2. 安装插件: `openclaw plugins install <路径>`
+3. 将 `skill` 路径中的 `napcat-qq` 放入 OpenClaw 的 skill 目录中
+4. 按需求修改配置文件 `openclaw.json`
+5. 重启 OpenClaw Gateway: `openclaw gateway restart`
 
 ## 配置方法
 
@@ -35,9 +34,20 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git /opt/homebrew
 {
   "channels": {
     "napcat": {
-      "url": "http://127.0.0.1:3000",
+      "enabled": true,
       "agentId": "main",
-      "allowUsers": ["你的QQ号"]
+      "url": "http://127.0.0.1:3000",
+      "allowUsers": [
+        "123456789",
+        "987654321"
+      ],
+      "enableGroupMessages": true,
+      "groupMentionOnly": true,
+      "mediaProxyEnabled": true,
+      "publicBaseUrl": "http://127.0.0.1:18789",
+      "voiceBasePath": "/your/voice/path",
+      "enableInboundLogging": true,
+      "inboundLogDir": "/your/inbound/log/dir"
     }
   },
   "plugins": {
@@ -60,25 +70,9 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git /opt/homebrew
 | `enableGroupMessages` | boolean | 是否处理群消息 | `false` |
 | `groupMentionOnly` | boolean | 群消息是否需要 @ 机器人 | `true` |
 | `mediaProxyEnabled` | boolean | 启用 `/napcat/media` 媒体代理（跨设备发图推荐） | `false` |
-| `publicBaseUrl` | string | OpenClaw 对 NapCat 可达的地址（如 `http://192.168.1.10:18789`） | `""` |
+| `publicBaseUrl` | string | OpenClaw 对 NapCat 可达的地址（如 `http://127.0.0.1:18789`） | `""` |
 | `mediaProxyToken` | string | 媒体代理可选访问令牌 | `""` |
 | `voiceBasePath` | string | 相对语音文件名的基础目录（例如 `/tmp/napcat-voice`） | `""` |
-
-#### 群消息配置示例
-
-```json
-{
-  "channels": {
-    "napcat": {
-      "url": "http://127.0.0.1:3000",
-      "agentId": "main",
-      "allowUsers": ["你的QQ号"],
-      "enableGroupMessages": true,
-      "groupMentionOnly": true
-    }
-  }
-}
-```
 
 **群消息说明：**
 - `enableGroupMessages: false`（默认）：完全忽略群消息
@@ -142,16 +136,7 @@ Http 客户端
 
 ## Skill（napcat-qq）
 
-本仓库包含 Codex Skill：`skill/napcat-qq`，用于强制使用本插件发送 QQ 消息并规范 sessionKey。
-
-安装后可在提示词中使用 `$napcat-qq`，并确保消息调用显式设置 `channel=napcat`。
-
-### 查看日志
-
-```bash
-# 查看 OpenClaw 日志
-tail -f /tmp/openclaw/openclaw-*.log | grep NapCat
-```
+本仓库包含 Skill：`skill/napcat-qq`，用于强制使用本插件发送 QQ 消息并规范 sessionKey。
 
 ## 开发
 
