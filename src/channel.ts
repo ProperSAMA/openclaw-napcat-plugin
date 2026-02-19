@@ -1,10 +1,14 @@
 // Minimal NapCat Channel Implementation
 import { setNapCatConfig } from "./runtime.js";
 
-async function sendToNapCat(url: string, payload: any) {
+async function sendToNapCat(url: string, payload: any, token?: string) {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+    }
     const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(payload)
     });
     if (!res.ok) {
@@ -156,6 +160,12 @@ export const napcatPlugin = {
                 title: "Inbound Log Directory",
                 description: "Directory to store per-user/per-group inbound logs",
                 default: "./logs/napcat-inbound"
+            },
+            token: {
+                type: "string",
+                title: "HTTP API Token",
+                description: "Token for authenticating with NapCat HTTP server (Bearer token)",
+                default: ""
             }
         }
     },
@@ -179,6 +189,7 @@ export const napcatPlugin = {
         sendText: async ({ to, text, cfg }: any) => {
             const config = cfg.channels?.napcat || {};
             const baseUrl = config.url || "http://127.0.0.1:3000";
+            const token = config.token || "";
             
             let targetType = "private";
             let targetId = to;
@@ -211,7 +222,7 @@ export const napcatPlugin = {
             console.log(`[NapCat] Sending to ${targetType} ${targetId}: ${text}`);
             
             try {
-                const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload);
+                const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload, token);
                 return { ok: true, result };
             } catch (err: any) {
                 return { ok: false, error: err.message };
@@ -220,6 +231,7 @@ export const napcatPlugin = {
         sendMedia: async ({ to, text, mediaUrl, cfg }: any) => {
             const config = cfg.channels?.napcat || {};
             const baseUrl = config.url || "http://127.0.0.1:3000";
+            const token = config.token || "";
 
             let targetType = "private";
             let targetId = to;
@@ -255,7 +267,7 @@ export const napcatPlugin = {
             console.log(`[NapCat] Sending media to ${targetType} ${targetId}: ${message}`);
 
             try {
-                const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload);
+                const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload, token);
                 return { ok: true, result };
             } catch (err: any) {
                 return { ok: false, error: err.message };
