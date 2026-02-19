@@ -8,10 +8,14 @@ import { getNapCatRuntime, getNapCatConfig } from "./runtime.js";
 
 
 // Simple function to send message via NapCat API
-async function sendToNapCat(url: string, payload: any) {
+async function sendToNapCat(url: string, payload: any, token?: string) {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+    }
     const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(payload)
     });
     if (!res.ok) {
@@ -277,6 +281,11 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
     try {
         const body = await readBody(req);
         const config = getNapCatConfig();
+        
+        // Note: Token verification for incoming requests from NapCat is not implemented
+        // because NapCat's HTTP client does not support custom Authorization headers.
+        // The token is only used when OpenClaw sends messages TO NapCat.
+        
         const events = extractNapCatEvents(body);
 
         try {
@@ -496,6 +505,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         // Actually send the message via NapCat API
                         const config = getNapCatConfig();
                         const baseUrl = config.url || "http://127.0.0.1:3000";
+                        const token = config.token || "";
                         const isGroup = conversationId.startsWith("group:");
                         const targetId = isGroup ? conversationId.replace("group:", "") : conversationId.replace("private:", "");
                         const endpoint = isGroup ? "/send_group_msg" : "/send_private_msg";
@@ -509,7 +519,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         else msgPayload.user_id = targetId;
                         
                         console.log(`[NapCat] Sending reply to ${isGroup ? 'group' : 'private'} ${targetId}: ${message.substring(0, 50)}...`);
-                        await sendToNapCat(`${baseUrl}${endpoint}`, msgPayload);
+                        await sendToNapCat(`${baseUrl}${endpoint}`, msgPayload, token);
                         console.log("[NapCat] Reply sent successfully");
                     },
                     onError: (err, info) => {
@@ -529,6 +539,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         // Actually send the message via NapCat API
                         const config = getNapCatConfig();
                         const baseUrl = config.url || "http://127.0.0.1:3000";
+                        const token = config.token || "";
                         const isGroup = conversationId.startsWith("group:");
                         const targetId = isGroup ? conversationId.replace("group:", "") : conversationId.replace("private:", "");
                         const endpoint = isGroup ? "/send_group_msg" : "/send_private_msg";
@@ -542,7 +553,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         else msgPayload.user_id = targetId;
                         
                         console.log(`[NapCat] Sending reply to ${isGroup ? 'group' : 'private'} ${targetId}: ${message.substring(0, 50)}...`);
-                        await sendToNapCat(`${baseUrl}${endpoint}`, msgPayload);
+                        await sendToNapCat(`${baseUrl}${endpoint}`, msgPayload, token);
                         console.log("[NapCat] Reply sent successfully");
                     },
                     onError: (err, info) => {
