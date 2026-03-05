@@ -12,7 +12,16 @@ const plugin = {
   register(api: OpenClawPluginApi) {
     setNapCatRuntime(api.runtime);
     api.registerChannel({ plugin: napcatPlugin as any });
-    api.registerHttpHandler(handleNapCatWebhook);
+
+    // Compatibility: old SDKs expose registerHttpHandler, newer SDKs prefer registerHttpRoute.
+    const anyApi = api as any;
+    if (typeof anyApi.registerHttpRoute === "function") {
+      anyApi.registerHttpRoute({ path: "/napcat", handler: handleNapCatWebhook });
+    } else if (typeof anyApi.registerHttpHandler === "function") {
+      anyApi.registerHttpHandler(handleNapCatWebhook);
+    } else {
+      throw new Error("NapCat plugin: no HTTP registration API found (registerHttpRoute/registerHttpHandler)");
+    }
   },
 };
 
