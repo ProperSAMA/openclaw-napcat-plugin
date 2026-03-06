@@ -1,10 +1,29 @@
 // Minimal NapCat Channel Implementation
 import { setNapCatConfig } from "./runtime.js";
 
-async function sendToNapCat(url: string, payload: any) {
-    const res = await fetch(url, {
+function appendAccessToken(rawUrl: string, token: string): string {
+    const trimmedToken = String(token || "").trim();
+    if (!trimmedToken) return rawUrl;
+    try {
+        const target = new URL(rawUrl);
+        if (!target.searchParams.has("access_token")) {
+            target.searchParams.set("access_token", trimmedToken);
+        }
+        return target.toString();
+    } catch {
+        return rawUrl;
+    }
+}
+
+async function sendToNapCat(url: string, payload: any, config: any) {
+    const token = String(config?.token || config?.accessToken || "").trim();
+    const authedUrl = appendAccessToken(url, token);
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const res = await fetch(authedUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(payload)
     });
     if (!res.ok) {
@@ -109,6 +128,12 @@ export const napcatPlugin = {
                 description: "Only accept messages from these QQ user IDs (empty = accept all)",
                 default: []
             },
+            token: {
+                type: "string",
+                title: "NapCat Access Token",
+                description: "Optional NapCat HTTP API token (sent as Authorization Bearer and access_token query)",
+                default: ""
+            },
             enableGroupMessages: {
                 type: "boolean",
                 title: "Enable Group Messages",
@@ -211,7 +236,7 @@ export const napcatPlugin = {
             console.log(`[NapCat] Sending to ${targetType} ${targetId}: ${text}`);
             
             try {
-                const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload);
+                const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload, config);
                 return { ok: true, result };
             } catch (err: any) {
                 return { ok: false, error: err.message };
@@ -255,7 +280,7 @@ export const napcatPlugin = {
             console.log(`[NapCat] Sending media to ${targetType} ${targetId}: ${message}`);
 
             try {
-                const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload);
+                const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload, config);
                 return { ok: true, result };
             } catch (err: any) {
                 return { ok: false, error: err.message };

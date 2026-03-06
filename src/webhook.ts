@@ -32,18 +32,34 @@ function isRetryableNapCatError(err: any): boolean {
     return ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "UND_ERR_SOCKET", "ECONNABORTED"].includes(code);
 }
 
+function appendAccessToken(rawUrl: string, token: string): string {
+    const trimmedToken = String(token || "").trim();
+    if (!trimmedToken) return rawUrl;
+    try {
+        const target = new URL(rawUrl);
+        if (!target.searchParams.has("access_token")) {
+            target.searchParams.set("access_token", trimmedToken);
+        }
+        return target.toString();
+    } catch {
+        return rawUrl;
+    }
+}
+
 async function postJsonWithNodeHttp(
     url: string,
     payload: any,
     timeoutMs: number,
-    opts?: { connectionClose?: boolean }
+    opts?: { connectionClose?: boolean; token?: string }
 ): Promise<{ statusCode: number; statusText: string; bodyText: string }> {
-    const target = new URL(url);
+    const authedUrl = appendAccessToken(url, String(opts?.token || ""));
+    const target = new URL(authedUrl);
     const isHttps = target.protocol === "https:";
     const body = JSON.stringify(payload);
     const transport = isHttps ? httpsRequest : httpRequest;
     const connectionClose = opts?.connectionClose === true;
     const agent = connectionClose ? undefined : (isHttps ? napcatHttpsAgent : napcatHttpAgent);
+    const token = String(opts?.token || "").trim();
 
     return new Promise((resolve, reject) => {
         const req = transport(
@@ -58,6 +74,7 @@ async function postJsonWithNodeHttp(
                     "Content-Type": "application/json",
                     "Content-Length": Buffer.byteLength(body),
                     "Connection": connectionClose ? "close" : "keep-alive",
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
             },
             (res) => {
@@ -90,6 +107,7 @@ async function sendToNapCat(url: string, payload: any) {
     const timeoutsMs = [5000, 7000, 9000];
     const cfg = getNapCatConfig();
     const connectionClose = cfg.connectionClose !== false; // default true for local docker stability
+    const token = String(cfg.token || cfg.accessToken || "").trim();
     const target = new URL(url);
     const targetInfo = `${target.protocol}//${target.hostname}:${target.port || (target.protocol === "https:" ? "443" : "80")}${target.pathname}`;
 
@@ -98,7 +116,7 @@ async function sendToNapCat(url: string, payload: any) {
         const startedAt = Date.now();
         try {
             const timeoutMs = timeoutsMs[Math.min(attempt - 1, timeoutsMs.length - 1)];
-            const res = await postJsonWithNodeHttp(url, payload, timeoutMs, { connectionClose });
+            const res = await postJsonWithNodeHttp(url, payload, timeoutMs, { connectionClose, token });
 
             if (res.statusCode < 200 || res.statusCode >= 300) {
                 throw new Error(`NapCat API Error: ${res.statusCode} ${res.statusText}${res.bodyText ? ` | ${res.bodyText.slice(0, 300)}` : ""}`);
