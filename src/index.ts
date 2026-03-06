@@ -56,4 +56,6 @@ export {
 export { logInboundMessage, logInboundParseFailure, sanitizeLogToken, getInboundLogFilePath } from "./napcat-inbound-log.js";
 export { handleMediaProxyRequest } from "./napcat-media-proxy.js";
 export { handleNapCatFriendRequest } from "./napcat-friend-request.js";
+export { handleNapCatGroupRequest } from "./napcat-group-request.js";
+export { handleNapCatNoticeEvent } from "./napcat-notice-event.js";
 export { handleNapCatMessageEvent } from "./napcat-message-event.js";

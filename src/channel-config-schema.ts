@@ -170,7 +170,7 @@ export const napcatChannelConfigSchema = {
         inboundLogDir: {
             type: "string",
             title: "Inbound Log Directory",
-            description: "Directory to store per-user/per-group inbound logs",
+            description: "Directory to store per-user/per-group inbound logs and notice audit logs",
             default: "./logs/napcat-inbound",
         },
         actionTimeoutMs: {
@@ -201,7 +201,7 @@ export const napcatChannelConfigSchema = {
         friendRequestLogDir: {
             type: "string",
             title: "Friend Request Log Directory",
-            description: "Directory to store friend request logs and action audit logs",
+            description: "Directory to store friend/group request logs and action audit logs",
             default: "./logs/napcat-friend-requests",
         },
     },

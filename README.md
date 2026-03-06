@@ -40,7 +40,7 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
 - `src/channel.ts`：NapCat channel 入口，保留插件声明、配置接入、`sendText`、`sendMedia`
 - `src/webhook.ts`：NapCat webhook 入口，保留 HTTP 入口、事件分发、兼容导出
 - `src/index.ts`：共享模块 barrel，统一导出 target、transport、message format、action params、媒体上下文、日志、消息事件等公共能力
-- `src/actions/index.ts`：action handler barrel，统一导出 `friend` / `group` / `system` / `file` / `stream` handlers
+- `src/actions/index.ts`：action handler barrel，统一导出 `friend` / `group` / `request-notice` / `system` / `file` / `stream` handlers
 - `src/runtime.ts`：插件运行时与当前 channel 配置的全局访问入口
 - `src/ws.ts`：NapCat WebSocket transport、连接管理、心跳、`stream-action` 聚合
 - `src/napcat-transport.ts`：HTTP/WS 发送、token 注入、通用 `callNapCatAction`
@@ -49,6 +49,8 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
 - `src/napcat-inbound-media.ts`：CQ 媒体解析、本地下载、上下文构建
 - `src/napcat-message-event.ts`：入站消息主流程、session 路由、多模态上下文注入、reply dispatcher
 - `src/napcat-friend-request.ts`：好友申请日志与自动处理
+- `src/napcat-group-request.ts`：群申请 / 群邀请事件审计
+- `src/napcat-notice-event.ts`：高价值 notice 事件审计
 - `src/napcat-media-proxy.ts`：`/napcat/media` 代理处理
 - `src/napcat-inbound-log.ts`：入站日志与 parse-error 日志
 
@@ -141,7 +143,7 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
 | `mediaProxyToken` | string | 媒体代理可选访问令牌 | `""` |
 | `voiceBasePath` | string | 相对语音文件名的基础目录（例如 `/tmp/napcat-voice`） | `""` |
 | `enableInboundLogging` | boolean | 是否记录入站消息日志 | `true` |
-| `inboundLogDir` | string | 入站日志目录 | `"./logs/napcat-inbound"` |
+| `inboundLogDir` | string | 入站消息与 notice 审计日志目录 | `"./logs/napcat-inbound"` |
 | `inboundImageEnabled` | boolean | 是否解析入站 CQ:image/CQ:record 为多模态输入 | `true` |
 | `inboundImagePreferUrl` | boolean | 解析图片时是否优先使用 CQ 中的 `url` 字段（否则优先 `file`） | `true` |
 | `inboundMediaDir` | string | 入站媒体本地缓存目录，插件会先下载到这里再交给 OpenClaw | `"./workspace/napcat-inbound-media"` |
@@ -153,7 +155,7 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
 | `autoApproveFriendRequests` | boolean | 是否自动同意收到的好友申请 | `false` |
 | `friendAutoRemarkTemplate` | string | 自动同意好友申请时的备注模板，支持 `{userId}` / `{nickname}` / `{comment}` | `""` |
 | `friendRequestAllowUsers` | string[] | 自动同意好友申请的 QQ 白名单，空数组表示不限制 | `[]` |
-| `friendRequestLogDir` | string | 好友申请日志目录 | `"./logs/napcat-friend-requests"` |
+| `friendRequestLogDir` | string | 好友 / 群申请审计日志目录 | `"./logs/napcat-friend-requests"` |
 
 **群消息说明：**
 - `enableGroupMessages: false`（默认）：完全忽略群消息
@@ -491,6 +493,27 @@ OpenClaw 示例：
 }
 ```
 
+### 第七批请求 / 通知接口
+
+当前已优先适配：
+
+- `action:set_group_add_request`
+- `action:get_group_system_msg`
+- `action:get_group_ignore_add_request`
+
+其中：
+
+- `set_group_add_request` 需要 JSON：`{"flag":"<flag>","sub_type":"add","approve":true,"reason":"欢迎加入"}`
+- `get_group_system_msg` 需要 JSON：`{}`
+- `get_group_ignore_add_request` 需要 JSON：`{}`
+
+说明：
+
+- `set_group_add_request` 用于处理群申请或群邀请；`sub_type` 当前要求显式传 `add` 或 `invite`。
+- `approve=false` 时可选传 `reason` 作为拒绝说明；为兼容旧调用，也接受把 `remark` 当作 `reason` 传入。
+- 推荐先调用 `get_group_system_msg` 查看待处理系统消息，再结合 webhook 记录到的 `flag` 做审批。
+- 这批接口都有副作用或会影响待处理队列，建议在执行前再次确认 `flag`、`sub_type` 与目标群。
+
 ## 好友申请日志与自动处理
 
 NapCat 上报 `post_type=request` + `request_type=friend` 时，插件会：
@@ -503,6 +526,47 @@ NapCat 上报 `post_type=request` + `request_type=friend` 时，插件会：
 
 - `./logs/napcat-friend-requests/requests.log`
 - `./logs/napcat-friend-requests/qq-<QQ号>.log`
+
+## 群申请 / 群邀请日志
+
+NapCat 上报 `post_type=request` + `request_type=group` 时，插件会：
+
+- 把群申请和群邀请写入 `friendRequestLogDir`
+- 在 `requests.log` 中保留总览，便于统一检索最近待处理项
+- 同时按群和按用户拆分文件，便于审批前回看上下文
+
+默认日志文件：
+
+- `./logs/napcat-friend-requests/requests.log`
+- `./logs/napcat-friend-requests/group-<群号>.log`
+- `./logs/napcat-friend-requests/qq-<QQ号>.log`
+
+常用字段：
+
+- `ts`、`group_id`、`user_id`、`sub_type`、`comment`、`flag`、`status`
+
+## Notice 事件审计
+
+NapCat 上报 `post_type=notice` 时，插件会把事件写入 `inboundLogDir` 下的 notice 日志。
+
+首批重点覆盖：
+
+- `group_increase`
+- `group_decrease`
+- `group_recall`
+- `group_ban`
+- `group_admin`
+
+默认日志文件：
+
+- `./logs/napcat-inbound/notices.log`
+- `./logs/napcat-inbound/notices/group-<群号>.log`
+- `./logs/napcat-inbound/notices/qq-<QQ号>.log`
+
+说明：
+
+- 当前阶段以统一审计和后续工作流衔接为主，默认不会自动执行群治理动作。
+- 每条记录会保留 `notice_type`、`sub_type`、`operator_id`、`message_id`、`duration` 等关键字段，便于后续 skill/agent 做审批、回溯或风控。
 
 ## 跨设备图片发送（临时媒体 HTTP 服务）
 

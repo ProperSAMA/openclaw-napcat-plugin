@@ -4,6 +4,7 @@ import {
     fileActionHandlers,
     friendActionHandlers,
     groupActionHandlers,
+    requestNoticeActionHandlers,
     streamActionHandlers,
     systemActionHandlers,
 } from "./actions/index.js";
@@ -11,6 +12,7 @@ import {
 const actionHandlers: Record<string, (config: any, rawPayload: any) => Promise<any>> = {
     ...friendActionHandlers,
     ...groupActionHandlers,
+    ...requestNoticeActionHandlers,
     ...systemActionHandlers,
     ...fileActionHandlers,
     ...streamActionHandlers,

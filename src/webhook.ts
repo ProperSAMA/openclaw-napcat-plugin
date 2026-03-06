@@ -5,9 +5,11 @@ import {
     getInboundImageContext,
     getInboundMediaContext,
     getInboundVideoContext,
+    handleNapCatGroupRequest,
     handleMediaProxyRequest,
     handleNapCatFriendRequest,
     handleNapCatMessageEvent,
+    handleNapCatNoticeEvent,
     logInboundMessage,
     logInboundParseFailure,
 } from "./index.js";
@@ -75,6 +77,14 @@ export async function handleNapCatInboundBody(body: any): Promise<void> {
         if (event.post_type === "meta_event") continue;
         if (event.post_type === "request" && event.request_type === "friend") {
             await handleNapCatFriendRequest(event, config);
+            continue;
+        }
+        if (event.post_type === "request" && event.request_type === "group") {
+            await handleNapCatGroupRequest(event, config);
+            continue;
+        }
+        if (event.post_type === "notice") {
+            await handleNapCatNoticeEvent(event, config);
             continue;
         }
         if (event.post_type !== "message") continue;
