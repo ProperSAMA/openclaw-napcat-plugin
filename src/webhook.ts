@@ -3,7 +3,7 @@ import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
 import { appendFile, mkdir, stat, writeFile } from "node:fs/promises";
-import { dirname, extname, resolve } from "node:path";
+import { basename, dirname, extname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getNapCatRuntime, getNapCatConfig } from "./runtime.js";
 import { isWsTransport, sendNapCatActionOverWs } from "./ws.js";
@@ -405,6 +405,69 @@ interface ParsedMedia {
 interface DownloadedMedia {
     paths: string[];
     types: string[];
+    records: Array<{ sourceUrl: string; path: string; type: string }>;
+}
+
+interface NapCatImageSegment {
+    file: string;
+    url: string;
+    summary: string;
+    fileSize: string;
+    index: number;
+}
+
+interface InboundImageContext {
+    id: string;
+    createdAt: number;
+    messageId: string;
+    chatType: "group" | "direct";
+    conversationId: string;
+    senderId: string;
+    groupId?: string;
+    sourceIndex: number;
+    file: string;
+    url: string;
+    summary: string;
+    fileSize: string;
+    localPath: string;
+}
+
+const inboundImageContextCache = new Map<string, InboundImageContext>();
+const inboundImageContextTtlMs = 24 * 60 * 60 * 1000;
+
+function cleanupInboundImageContexts(now = Date.now()) {
+    for (const [key, entry] of inboundImageContextCache) {
+        if (now - entry.createdAt > inboundImageContextTtlMs) {
+            inboundImageContextCache.delete(key);
+        }
+    }
+}
+
+function buildInboundImageContextId(chatType: "group" | "direct", conversationId: string, messageId: string, sourceIndex: number): string {
+    const safeConversation = conversationId.replace(/[^a-zA-Z0-9:_-]/g, "_");
+    return `napcat-image:${chatType}:${safeConversation}:${messageId}:${sourceIndex}`;
+}
+
+export function getInboundImageContext(id: string): InboundImageContext | null {
+    cleanupInboundImageContexts();
+    const entry = inboundImageContextCache.get(String(id || "").trim());
+    return entry || null;
+}
+
+function extractNapCatImageSegments(event: any): NapCatImageSegment[] {
+    const segments = Array.isArray(event?.message) ? event.message : [];
+    const results: NapCatImageSegment[] = [];
+    let index = 0;
+    for (const segment of segments) {
+        if (!segment || segment.type !== "image" || typeof segment.data !== "object") continue;
+        const file = decodeHtmlEntities(String(segment.data.file || "").trim());
+        const url = decodeHtmlEntities(String(segment.data.url || "").trim());
+        const summary = String(segment.data.summary || "").trim();
+        const fileSize = String(segment.data.file_size || segment.data.fileSize || "").trim();
+        results.push({ file, url, summary, fileSize, index });
+        index++;
+    }
+    return results;
 }
 
 function decodeHtmlEntities(input: string): string {
@@ -508,7 +571,7 @@ function normalizeInboundMediaType(contentType: string): string {
 }
 
 async function downloadInboundMedia(urls: string[], kind: "image" | "audio", config: any): Promise<DownloadedMedia> {
-    const result: DownloadedMedia = { paths: [], types: [] };
+    const result: DownloadedMedia = { paths: [], types: [], records: [] };
     if (!Array.isArray(urls) || urls.length === 0) return result;
 
     const mediaDir = getInboundMediaDir(config);
@@ -531,7 +594,9 @@ async function downloadInboundMedia(urls: string[], kind: "image" | "audio", con
             const buffer = Buffer.from(await response.arrayBuffer());
             await writeFile(filePath, buffer);
             result.paths.push(filePath);
-            result.types.push(normalizeInboundMediaType(contentType));
+            const normalizedType = normalizeInboundMediaType(contentType);
+            result.types.push(normalizedType);
+            result.records.push({ sourceUrl: mediaUrl, path: filePath, type: normalizedType });
         } catch (err) {
             console.warn(`[NapCat] Failed to download inbound ${kind}: ${mediaUrl}`, err);
         }
@@ -540,26 +605,109 @@ async function downloadInboundMedia(urls: string[], kind: "image" | "audio", con
     return result;
 }
 
-export async function handleNapCatInboundBody(body: any): Promise<void> {
-    const config = getNapCatConfig();
-    const events = extractNapCatEvents(body);
+function getFriendRequestLogDir(config: any): string {
+    const baseDirRaw = String(config.friendRequestLogDir || "./logs/napcat-friend-requests").trim() || "./logs/napcat-friend-requests";
+    return resolve(baseDirRaw);
+}
 
-    try {
-        if (body?.__parseError && typeof body.__raw === "string" && body.__raw.trim()) {
-            await logInboundParseFailure(body.__raw, config);
-        }
-        for (const event of events) {
-            await logInboundMessage(event, config);
-        }
-    } catch (err) {
-        console.error("[NapCat] Failed to write inbound log:", err);
+function renderFriendRemarkTemplate(template: string, event: any): string {
+    const rawTemplate = String(template || "").trim();
+    if (!rawTemplate) return "";
+    const nickname = String(event?.nickname || event?.sender?.nickname || "").trim();
+    const comment = String(event?.comment || "").trim();
+    return rawTemplate
+        .replace(/\{userId\}/g, String(event?.user_id || ""))
+        .replace(/\{nickname\}/g, nickname)
+        .replace(/\{comment\}/g, comment);
+}
+
+async function appendFriendRequestLog(event: any, config: any, extra: Record<string, any> = {}): Promise<void> {
+    const baseDir = getFriendRequestLogDir(config);
+    const userId = sanitizeLogToken(String(event?.user_id || "unknown_user"));
+    const line = JSON.stringify({
+        ts: new Date().toISOString(),
+        post_type: event?.post_type || "",
+        request_type: event?.request_type || "",
+        self_id: event?.self_id,
+        user_id: event?.user_id,
+        nickname: event?.nickname || event?.sender?.nickname || "",
+        comment: event?.comment || "",
+        flag: event?.flag || "",
+        ...extra,
+    }) + "\n";
+    const files = [
+        resolve(baseDir, "requests.log"),
+        resolve(baseDir, `qq-${userId}.log`),
+    ];
+    for (const filePath of files) {
+        await mkdir(dirname(filePath), { recursive: true });
+        await appendFile(filePath, line, "utf8");
+    }
+}
+
+async function handleNapCatFriendRequest(event: any, config: any): Promise<void> {
+    const userId = String(event?.user_id || "").trim();
+    const flag = String(event?.flag || "").trim();
+    if (!userId || !flag) {
+        await appendFriendRequestLog(event, config, {
+            status: "invalid",
+            reason: "missing_user_id_or_flag",
+        });
+        console.warn("[NapCat] Ignore malformed friend request event:", event);
+        return;
     }
 
-    const event = events[0] || body;
+    const allowUsers = Array.isArray(config.friendRequestAllowUsers)
+        ? config.friendRequestAllowUsers.map((item: any) => String(item))
+        : [];
+    const allowMatched = allowUsers.length === 0 || allowUsers.includes(userId);
+    const autoApprove = config.autoApproveFriendRequests === true && allowMatched;
+    const remark = renderFriendRemarkTemplate(String(config.friendAutoRemarkTemplate || ""), event);
 
-    if (event.post_type === "meta_event") return;
-    if (event.post_type !== "message") return;
+    if (!autoApprove) {
+        const status = config.autoApproveFriendRequests === true && !allowMatched
+            ? "pending_blocked_by_allowlist"
+            : "pending";
+        await appendFriendRequestLog(event, config, {
+            status,
+            autoApprove: false,
+            allowMatched,
+            remark,
+        });
+        console.log(`[NapCat] Friend request pending from ${userId} comment=${String(event?.comment || "").slice(0, 80)}`);
+        return;
+    }
 
+    const payload: any = {
+        flag,
+        approve: true,
+    };
+    if (remark) {
+        payload.remark = remark;
+    }
+
+    try {
+        await sendNapCatByTransport(config, "/set_friend_add_request", payload);
+        await appendFriendRequestLog(event, config, {
+            status: "approved",
+            autoApprove: true,
+            allowMatched: true,
+            remark,
+        });
+        console.log(`[NapCat] Auto approved friend request from ${userId}`);
+    } catch (err: any) {
+        await appendFriendRequestLog(event, config, {
+            status: "approve_failed",
+            autoApprove: true,
+            allowMatched: true,
+            remark,
+            error: String(err?.message || err || ""),
+        });
+        console.error(`[NapCat] Auto approve friend request failed for ${userId}:`, err);
+    }
+}
+
+async function handleNapCatMessageEvent(event: any, config: any): Promise<void> {
     const runtime = getNapCatRuntime();
     const isGroup = event.message_type === "group";
     const senderId = String(event.user_id);
@@ -661,6 +809,33 @@ export async function handleNapCatInboundBody(body: any): Promise<void> {
     const finalText = parsedMedia.text || text;
     const downloadedImages = await downloadInboundMedia(mediaImageUrls, "image", config);
     const downloadedAudios = await downloadInboundMedia(mediaAudioUrls, "audio", config);
+    const imageSegments = extractNapCatImageSegments(event);
+    const downloadedImageByUrl = new Map(downloadedImages.records.map((record) => [record.sourceUrl, record]));
+    const imageContexts: InboundImageContext[] = [];
+    cleanupInboundImageContexts();
+    for (const segment of imageSegments) {
+        const sourceUrl = segment.url || segment.file;
+        const downloaded = downloadedImageByUrl.get(sourceUrl);
+        if (!downloaded?.path) continue;
+        const contextId = buildInboundImageContextId(isGroup ? "group" : "direct", conversationId, messageId, segment.index);
+        const context: InboundImageContext = {
+            id: contextId,
+            createdAt: Date.now(),
+            messageId,
+            chatType: isGroup ? "group" : "direct",
+            conversationId,
+            senderId,
+            groupId: isGroup ? String(event.group_id) : undefined,
+            sourceIndex: segment.index,
+            file: segment.file,
+            url: segment.url,
+            summary: segment.summary,
+            fileSize: segment.fileSize,
+            localPath: downloaded.path,
+        };
+        inboundImageContextCache.set(contextId, context);
+        imageContexts.push(context);
+    }
 
     const ctxPayload: any = {
         Body: finalText,
@@ -694,7 +869,36 @@ export async function handleNapCatInboundBody(body: any): Promise<void> {
         ctxPayload.MediaUrls = mediaImageUrls;
         ctxPayload.MediaUrl = mediaImageUrls[0];
         ctxPayload.ImageUrls = mediaImageUrls;
-        ctxPayload.Images = mediaImageUrls.map((url: string) => ({ type: "image", url }));
+        ctxPayload.Images = mediaImageUrls.map((url: string, index: number) => {
+            const context = imageContexts.find((item) => item.sourceIndex === index);
+            return context ? {
+                type: "image",
+                url,
+                file: context.file,
+                contextImageId: context.id,
+                localPath: context.localPath,
+            } : { type: "image", url };
+        });
+    }
+
+    if (imageContexts.length > 0) {
+        ctxPayload.ImageContextIds = imageContexts.map((item) => item.id);
+        ctxPayload.ImageContextId = imageContexts[0].id;
+        ctxPayload.ImageContexts = imageContexts.map((item) => ({
+            id: item.id,
+            type: "image",
+            url: item.url,
+            file: item.file,
+            summary: item.summary,
+            fileSize: item.fileSize,
+            localPath: item.localPath,
+            messageId: item.messageId,
+            chatType: item.chatType,
+            conversationId: item.conversationId,
+            sourceIndex: item.sourceIndex,
+            downloadTarget: "action:download_file_image_stream",
+            downloadPayload: { context_image_id: item.id },
+        }));
     }
 
     if (mediaAudioUrls.length > 0) {
@@ -793,6 +997,33 @@ export async function handleNapCatInboundBody(body: any): Promise<void> {
         dispatcher,
         replyOptions: {},
     });
+}
+
+export async function handleNapCatInboundBody(body: any): Promise<void> {
+    const config = getNapCatConfig();
+    const events = extractNapCatEvents(body);
+
+    try {
+        if (body?.__parseError && typeof body.__raw === "string" && body.__raw.trim()) {
+            await logInboundParseFailure(body.__raw, config);
+        }
+        for (const event of events) {
+            await logInboundMessage(event, config);
+        }
+    } catch (err) {
+        console.error("[NapCat] Failed to write inbound log:", err);
+    }
+
+    for (const event of events) {
+        if (!event || typeof event !== "object") continue;
+        if (event.post_type === "meta_event") continue;
+        if (event.post_type === "request" && event.request_type === "friend") {
+            await handleNapCatFriendRequest(event, config);
+            continue;
+        }
+        if (event.post_type !== "message") continue;
+        await handleNapCatMessageEvent(event, config);
+    }
 }
 
 export async function handleNapCatWebhook(req: IncomingMessage, res: ServerResponse): Promise<boolean> {

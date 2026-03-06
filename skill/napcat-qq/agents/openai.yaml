@@ -1,4 +1,4 @@
 interface:
   display_name: "Napcat QQ"
-  short_description: "QQ 消息仅走 napcat 插件并规范 sessionKey"
-  default_prompt: "使用 $napcat-qq 发送 QQ 私聊或群消息，并按规则生成 sessionKey。调用 message 工具时必须显式指定 channel=napcat。"
+  short_description: "QQ 消息、好友、群管理、系统增强、文件和流式媒体 action 仅走 napcat 插件"
+  default_prompt: "使用 $napcat-qq 处理 QQ 私聊、群消息，以及 NapCat 好友/群管理/系统增强/文件 action。发送消息时调用 message 工具并显式指定 channel=napcat；结构化接口调用统一使用 target=action:<接口名>，text 传 JSON 参数。好友相关优先使用 get_friend_list、get_stranger_info、set_friend_add_request、set_friend_remark；群管理优先使用 get_group_list、get_group_info、get_group_member_list、set_group_ban、set_group_kick、set_group_card、set_group_name；系统增强优先使用 get_status、get_version_info、get_recent_contact、set_online_status、ocr_image；文件相关优先使用 upload_private_file、upload_group_file、get_group_root_files、get_group_files_by_folder、get_group_file_url、delete_group_file、move_group_file、get_private_file_url、get_file、get_record、upload_file_stream、download_file_stream、download_file_image_stream、download_file_record_stream、clean_stream_temp_file。若上下文中已有 ImageContexts / ImageContextIds，下载图片时优先使用其中的 context_image_id 驱动 download_file_image_stream。"

@@ -11,6 +11,13 @@ QQ 聊天通道插件 for OpenClaw，基于 NapCat (OneBot 11) 实现。
 - ✅ 支持文本消息收发
 - ✅ 支持群聊/私聊 sessionKey 路由
 - ✅ 支持图片等媒体发送（CQ:image）
+- ✅ 支持 `action:<接口名>` 方式调用 NapCat 通用接口
+- ✅ 第一批内置好友能力：好友列表、好友申请处理、好友备注、陌生人信息
+- ✅ 第二批内置群管理能力：群列表、群信息、成员列表、禁言、踢人、群名片、群名
+- ✅ 第三批系统/增强能力：状态、版本、最近联系人、在线状态、图片 OCR
+- ✅ 第四批文件能力：私聊/群文件上传、群文件列表、文件 URL、删除群文件
+- ✅ 第五批补充文件能力：移动群文件、私聊文件直链、本地文件获取、音频转码获取
+- ✅ 第六批流式文件能力：兼容 `stream-action`，支持流式上传与临时文件清理
 - ✅ 可配置的接收用户白名单
 - ✅ 完整的消息路由和会话管理
 - ✅ 与 OpenClaw 无缝集成
@@ -47,9 +54,14 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
       "wsHeartbeatMs": 30000,
       "wsReconnectMs": 30000,
       "wsRequestTimeoutMs": 10000,
+      "actionTimeoutMs": 10000,
       "inboundMediaDir": "./workspace/napcat-inbound-media",
       "inboundImageEnabled": true,
       "inboundImagePreferUrl": true,
+      "autoApproveFriendRequests": false,
+      "friendAutoRemarkTemplate": "",
+      "friendRequestAllowUsers": [],
+      "friendRequestLogDir": "./logs/napcat-friend-requests",
       "allowUsers": [
         "123456789",
         "987654321"
@@ -88,6 +100,7 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
 | `wsHeartbeatMs` | number | WS 心跳间隔（毫秒） | `30000` |
 | `wsReconnectMs` | number | WS 重连间隔（毫秒，仅 `ws-client` 生效） | `30000` |
 | `wsRequestTimeoutMs` | number | WS action 请求超时（毫秒） | `10000` |
+| `actionTimeoutMs` | number | NapCat 通用 action 的超时提示配置（当前主要用于文档约定） | `10000` |
 | `agentId` | string | 可选，固定将 NapCat 会话绑定到该 OpenClaw agent（如 `main`、`ops`） | `""`（空=按默认路由） |
 | `allowUsers` | string[] | 允许接收消息的 QQ 用户 ID 列表 | `[]` (接收所有) |
 | `enableGroupMessages` | boolean | 是否处理群消息 | `false` |
@@ -101,6 +114,10 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
 | `inboundImageEnabled` | boolean | 是否解析入站 CQ:image/CQ:record 为多模态输入 | `true` |
 | `inboundImagePreferUrl` | boolean | 解析图片时是否优先使用 CQ 中的 `url` 字段（否则优先 `file`） | `true` |
 | `inboundMediaDir` | string | 入站媒体本地缓存目录，插件会先下载到这里再交给 OpenClaw | `"./workspace/napcat-inbound-media"` |
+| `autoApproveFriendRequests` | boolean | 是否自动同意收到的好友申请 | `false` |
+| `friendAutoRemarkTemplate` | string | 自动同意好友申请时的备注模板，支持 `{userId}` / `{nickname}` / `{comment}` | `""` |
+| `friendRequestAllowUsers` | string[] | 自动同意好友申请的 QQ 白名单，空数组表示不限制 | `[]` |
+| `friendRequestLogDir` | string | 好友申请日志目录 | `"./logs/napcat-friend-requests"` |
 
 **群消息说明：**
 - `enableGroupMessages: false`（默认）：完全忽略群消息
@@ -220,6 +237,218 @@ OpenClaw 示例：
 - `session:napcat:group:<群号>`
 
 注意：纯数字 `target` 会被当作私聊用户 ID，群聊请务必加上 `group:` 或 `session:napcat:group:` 前缀。
+
+## 通用 NapCat Action 调用
+
+为了让 OpenClaw 直接调用 NapCat 的更多接口，插件新增了统一调用面：
+
+- `channel: "napcat"`
+- `target: "action:<NapCat接口名>"`
+- `text`: JSON 参数对象
+
+示例：
+
+```json
+{
+  "channel": "napcat",
+  "target": "action:get_friend_list",
+  "text": "{}"
+}
+```
+
+```json
+{
+  "channel": "napcat",
+  "target": "action:get_stranger_info",
+  "text": "{\"user_id\":\"123456789\"}"
+}
+```
+
+说明：
+
+- `text` 必须是合法 JSON；也支持用 ```json fenced code block``` 包裹。
+- 未知 action 也会透传到 NapCat，但建议优先使用已在 skill 中约定的接口。
+- `sendMedia` 不支持 `action:*` 目标，action 调用只能走 `text` 参数。
+
+### 第一批好友接口
+
+当前已优先适配：
+
+- `action:get_friend_list`
+- `action:get_stranger_info`
+- `action:set_friend_add_request`
+- `action:set_friend_remark`
+- `action:delete_friend`
+
+其中：
+
+- `set_friend_add_request` 需要 JSON：`{"flag":"<flag>","approve":true,"remark":"张三"}`
+- `set_friend_remark` 需要 JSON：`{"user_id":"123456789","remark":"新备注"}`
+- `get_stranger_info` 需要 JSON：`{"user_id":"123456789"}`，可选 `no_cache`
+
+### 第二批群管理接口
+
+当前已优先适配：
+
+- `action:get_group_list`
+- `action:get_group_info`
+- `action:get_group_member_list`
+- `action:set_group_ban`
+- `action:set_group_kick`
+- `action:set_group_card`
+- `action:set_group_name`
+
+其中：
+
+- `get_group_info` 需要 JSON：`{"group_id":"123456789"}`，可选 `no_cache`
+- `get_group_member_list` 需要 JSON：`{"group_id":"123456789"}`
+- `set_group_ban` 需要 JSON：`{"group_id":"123456789","user_id":"10001","duration":1800}`
+- `set_group_kick` 需要 JSON：`{"group_id":"123456789","user_id":"10001","reject_add_request":false}`
+- `set_group_card` 需要 JSON：`{"group_id":"123456789","user_id":"10001","card":"新群名片"}`
+- `set_group_name` 需要 JSON：`{"group_id":"123456789","group_name":"新群名"}`
+
+建议：
+
+- 查询类接口可直接由 agent 调用
+- `set_group_ban` / `set_group_kick` / `set_group_card` / `set_group_name` 属于有副作用操作，建议由 skill 先确认参数再调用
+
+### 第三批系统/增强接口
+
+当前已优先适配：
+
+- `action:get_status`
+- `action:get_version_info`
+- `action:get_recent_contact`
+- `action:set_online_status`
+- `action:ocr_image`
+
+其中：
+
+- `get_status` 需要 JSON：`{}`
+- `get_version_info` 需要 JSON：`{}`
+- `get_recent_contact` 需要 JSON：`{}`
+- `set_online_status` 需要 JSON：`{"status":10}`，可选 `extStatus`、`batteryStatus`
+- `ocr_image` 需要 JSON：`{"image":"<NapCat图片ID或图片标识>"}`
+
+说明：
+
+- `get_status` / `get_version_info` / `get_recent_contact` 属于只读查询，适合直接作为运行状态检查。
+- `set_online_status` 会改变机器人 QQ 账号状态，请谨慎使用。
+- `ocr_image` 依赖 NapCat 可识别的图片标识，通常更适合处理已存在于 QQ/NapCat 上下文中的图片资源。参考 [NapCat Apifox OCR 文档](https://napcat.apifox.cn/226658231e0) 和 [NapCat 接口兼容情况](https://napneko.github.io/develop/api)。
+
+### 第四批文件接口
+
+当前已优先适配：
+
+- `action:upload_private_file`
+- `action:upload_group_file`
+- `action:get_group_root_files`
+- `action:get_group_files_by_folder`
+- `action:get_group_file_url`
+- `action:delete_group_file`
+
+其中：
+
+- `upload_private_file` 需要 JSON：`{"user_id":"123456789","file":"/tmp/test.txt","name":"test.txt"}`
+- `upload_group_file` 需要 JSON：`{"group_id":"123456789","file":"/tmp/test.txt","name":"test.txt"}`，可选 `folder`
+- `get_group_root_files` 需要 JSON：`{"group_id":"123456789"}`
+- `get_group_files_by_folder` 需要 JSON：`{"group_id":"123456789","folder_id":"/资料"}`
+- `get_group_file_url` 需要 JSON：`{"group_id":"123456789","file_id":"<file_id>","busid":102}`，`busid` 视 NapCat 返回结构决定是否必传
+- `delete_group_file` 需要 JSON：`{"group_id":"123456789","file_id":"<file_id>","busid":102}`，`busid` 视 NapCat 返回结构决定是否必传
+
+说明：
+
+- 列表/查询类接口可直接由 agent 调用。
+- 上传和删除属于有副作用操作，建议由 skill 先确认目标群号、QQ 号、文件路径和 `file_id`。
+- 若用户没有提供 `file_id` / `busid`，可先调用 `get_group_root_files` 或 `get_group_files_by_folder` 获取群文件元数据后再执行。
+
+### 第五批补充文件接口
+
+当前已优先适配：
+
+- `action:move_group_file`
+- `action:get_private_file_url`
+- `action:get_file`
+- `action:get_record`
+
+其中：
+
+- `move_group_file` 需要 JSON：`{"group_id":"123456789","file_id":"<file_id>","current_parent_directory":"/old","target_parent_directory":"/new"}`
+- `get_private_file_url` 需要 JSON：`{"file_id":"<file_id>"}`
+- `get_file` 需要 JSON：`{"file_id":"<file_id>"}` 或 `{"file":"<file>"}`
+- `get_record` 需要 JSON：`{"file_id":"<file_id>","out_format":"mp3"}`，也可改用 `file`
+
+说明：
+
+- `move_group_file` 属于有副作用操作，建议先通过 `get_group_root_files` / `get_group_files_by_folder` 获取 `file_id` 和目录 ID，再确认移动目标。
+- `get_private_file_url` 适合拿私聊文件直链；`get_group_file_url` 则用于群文件。
+- `get_file` / `get_record` 至少需要 `file_id` 或 `file` 之一。`get_record` 适合把收到的语音转成 `mp3`、`wav` 等通用格式。
+
+### 第六批流式文件接口
+
+当前已优先适配：
+
+- `action:upload_file_stream`
+- `action:download_file_stream`
+- `action:download_file_image_stream`
+- `action:download_file_record_stream`
+- `action:clean_stream_temp_file`
+
+其中：
+
+- `upload_file_stream` 分片阶段需要 JSON：`{"stream_id":"<stream_id>","chunk_data":"<base64>","chunk_index":0,"total_chunks":10,"file_size":12345,"expected_sha256":"<sha256>","filename":"big.bin"}`
+- `upload_file_stream` 完成阶段需要 JSON：`{"stream_id":"<stream_id>","is_complete":true}`
+- `download_file_stream` 需要 JSON：`{"file_id":"<file_id>"}` 或 `{"file":"<file>"}`，可选 `chunk_size`
+- `download_file_image_stream` 需要 JSON：`{"file_id":"<file_id>"}` 或 `{"file":"<file>"}`，可选 `chunk_size`
+- `download_file_record_stream` 需要 JSON：`{"file_id":"<file_id>"}` 或 `{"file":"<file>"}`，可选 `chunk_size`、`out_format`
+- `clean_stream_temp_file` 需要 JSON：`{}`
+
+说明：
+
+- 插件现已兼容 NapCat `stream-action` 多段返回：会等待同一 `echo` 的最终 `response` / `error`，并把中间分段附加到返回值中的 `stream_chunks`。
+- `upload_file_stream` 适用于大文件和跨设备部署，但需要外部先准备好分片后的 base64 数据与 SHA256。
+- `download_file_stream` 的官方参数是 `file` / `file_id` / `chunk_size`。插件会返回首段 `file_info`、后续 `file_chunk` 分段，以及最终 `file_complete` 汇总。
+- `download_file_image_stream` 与 `download_file_stream` 类似，但插件额外支持 `context_image_id`：当图片来自当前会话的入站消息上下文时，优先用这个稳定标识，不必依赖 NapCat 内部 UUID。普通 CQ 图片文件名或原始 URL 不一定能被 `resolveDownload()` 识别。
+- `download_file_record_stream` 与 `download_file_stream` 类似，但支持 `out_format` 转码，适合把语音流转换为 `mp3`、`wav`、`ogg` 等格式。
+- `clean_stream_temp_file` 的官方行为是清空 NapCat 流式传输临时目录，不是按单个 `stream_id` 精确删除，因此建议只在流式下载/上传完成且确认不再需要临时文件时调用。
+
+建议工作流：
+
+1. 若是当前会话刚收到的图片，优先从上下文中的 `ImageContexts` / `ImageContextIds` 取稳定标识
+2. 用 `{"context_image_id":"<ImageContextId>"}` 调用 `action:download_file_image_stream`
+3. 若不是上下文图片，再通过 `get_group_root_files`、`get_group_files_by_folder`、`get_file` 等方式拿稳定的 `file_id` 或 `file`
+4. 根据文件类型调用 `action:download_file_stream`、`action:download_file_image_stream` 或 `action:download_file_record_stream`
+5. 消费返回中的 `stream_chunks`
+6. 确认文件不再需要后，再调用 `action:clean_stream_temp_file` 清理 NapCat 临时目录
+
+入站图片上下文字段：
+
+- `ImageContextIds`: 当前消息提取到的稳定图片标识数组
+- `ImageContextId`: 第一张图片的稳定标识
+- `ImageContexts`: 详细数组，内含 `id`、`file`、`url`、`localPath`、`messageId`、`downloadTarget`、`downloadPayload`
+
+示例：
+
+```json
+{
+  "channel": "napcat",
+  "target": "action:download_file_image_stream",
+  "text": "{\"context_image_id\":\"napcat-image:group:group:514572748:7613633388475457095:0\",\"chunk_size\":65536}"
+}
+```
+
+## 好友申请日志与自动处理
+
+NapCat 上报 `post_type=request` + `request_type=friend` 时，插件会：
+
+- 把好友申请写入 `friendRequestLogDir`
+- 若 `autoApproveFriendRequests=true`，会直接调用 `set_friend_add_request`
+- 若配置了 `friendRequestAllowUsers`，仅对白名单 QQ 生效
+
+默认日志目录：
+
+- `./logs/napcat-friend-requests/requests.log`
+- `./logs/napcat-friend-requests/qq-<QQ号>.log`
 
 ## 跨设备图片发送（临时媒体 HTTP 服务）
 

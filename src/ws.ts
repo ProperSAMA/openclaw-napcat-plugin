@@ -2,6 +2,14 @@ import { WebSocketServer, WebSocket } from "ws";
 
 type JsonObject = Record<string, any>;
 type EventHandler = (body: any) => Promise<void>;
+type PendingWaiter = {
+    resolve: (v: any) => void;
+    reject: (e: Error) => void;
+    timer: NodeJS.Timeout;
+    timeoutMs: number;
+    action: string;
+    streamChunks: any[];
+};
 
 const WS_TRANSPORTS = new Set(["ws-client", "ws-server"]);
 
@@ -52,7 +60,7 @@ class NapCatWsRuntime {
     private wsServer: WebSocketServer | null = null;
     private serverSockets: Set<WebSocket> = new Set();
     private serverHeartbeatTimer: NodeJS.Timeout | null = null;
-    private pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
+    private pending = new Map<string, PendingWaiter>();
     private seq = 0;
     private currentConfig: any = {};
 
@@ -210,6 +218,14 @@ class NapCatWsRuntime {
         }, interval);
     }
 
+    private armPendingTimer(echo: string, waiter: PendingWaiter) {
+        if (waiter.timer) clearTimeout(waiter.timer);
+        waiter.timer = setTimeout(() => {
+            this.pending.delete(echo);
+            waiter.reject(new Error(`NapCat WS action timeout: ${waiter.action}`));
+        }, waiter.timeoutMs);
+    }
+
     private async onMessage(raw: string) {
         let payload: any;
         try {
@@ -222,12 +238,23 @@ class NapCatWsRuntime {
             const key = String(payload.echo);
             const waiter = this.pending.get(key);
             if (waiter) {
+                const isStreamAction = payload.stream === "stream-action";
+                const streamType = String(payload?.data?.type || "").trim().toLowerCase();
+                if (isStreamAction && streamType === "stream") {
+                    waiter.streamChunks.push(payload.data);
+                    this.armPendingTimer(key, waiter);
+                    return;
+                }
+
                 clearTimeout(waiter.timer);
                 this.pending.delete(key);
-                if (payload.status === "failed") {
-                    waiter.reject(new Error(`NapCat WS action failed: ${payload.retcode ?? "unknown"}`));
+                if (payload.status === "failed" || streamType === "error") {
+                    waiter.reject(new Error(payload?.message || `NapCat WS action failed: ${payload.retcode ?? "unknown"}`));
                 } else {
-                    waiter.resolve(payload);
+                    const resultPayload = waiter.streamChunks.length
+                        ? { ...payload, stream_chunks: waiter.streamChunks, stream_chunk_count: waiter.streamChunks.length }
+                        : payload;
+                    waiter.resolve(resultPayload);
                 }
                 return;
             }
@@ -270,15 +297,22 @@ class NapCatWsRuntime {
         const waitMs = Math.max(1000, Number(timeoutMs || this.currentConfig?.wsRequestTimeoutMs || 10000));
 
         return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => {
-                this.pending.delete(echo);
-                reject(new Error(`NapCat WS action timeout: ${action}`));
-            }, waitMs);
-            this.pending.set(echo, { resolve, reject, timer });
+            const waiter: PendingWaiter = {
+                resolve,
+                reject,
+                timer: setTimeout(() => {
+                    this.pending.delete(echo);
+                    reject(new Error(`NapCat WS action timeout: ${action}`));
+                }, waitMs),
+                timeoutMs: waitMs,
+                action,
+                streamChunks: [],
+            };
+            this.pending.set(echo, waiter);
             try {
                 socket.send(message);
             } catch (err: any) {
-                clearTimeout(timer);
+                clearTimeout(waiter.timer);
                 this.pending.delete(echo);
                 reject(err instanceof Error ? err : new Error(String(err)));
             }
