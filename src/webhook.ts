@@ -2,8 +2,9 @@ import { Agent as HttpAgent, request as httpRequest } from "node:http";
 import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
-import { appendFile, mkdir, stat } from "node:fs/promises";
+import { appendFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import { getNapCatRuntime, getNapCatConfig } from "./runtime.js";
 import { isWsTransport, sendNapCatActionOverWs } from "./ws.js";
 
@@ -395,6 +396,150 @@ function extractNapCatEvents(body: any): any[] {
     return [];
 }
 
+interface ParsedMedia {
+    text: string;
+    imageUrls: string[];
+    audioUrls: string[];
+}
+
+interface DownloadedMedia {
+    paths: string[];
+    types: string[];
+}
+
+function decodeHtmlEntities(input: string): string {
+    return String(input || "")
+        .replace(/&amp;/gi, "&")
+        .replace(/&quot;/gi, "\"")
+        .replace(/&#39;/gi, "'")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">");
+}
+
+function parseCqMedia(rawText: string, config: any): ParsedMedia {
+    const inboundImageEnabled = config.inboundImageEnabled !== false;
+    if (!inboundImageEnabled || !rawText || typeof rawText !== "string") {
+        return { text: rawText || "", imageUrls: [], audioUrls: [] };
+    }
+
+    const imageUrls: string[] = [];
+    const audioUrls: string[] = [];
+
+    const cqRegex = /\[CQ:([a-zA-Z0-9_]+)([^\]]*)\]/g;
+    let clean = "";
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = cqRegex.exec(rawText)) !== null) {
+        const before = rawText.slice(lastIndex, match.index);
+        clean += before;
+        lastIndex = cqRegex.lastIndex;
+
+        const type = match[1].toLowerCase();
+        const paramsRaw = (match[2] || "").replace(/^,/, "");
+        const kv: Record<string, string> = {};
+        if (paramsRaw) {
+            for (const part of paramsRaw.split(",")) {
+                const trimmed = part.trim();
+                if (!trimmed) continue;
+                const eqIndex = trimmed.indexOf("=");
+                if (eqIndex <= 0) continue;
+                const key = trimmed.slice(0, eqIndex).trim();
+                const value = trimmed.slice(eqIndex + 1).trim();
+                if (!key) continue;
+                kv[key] = value;
+            }
+        }
+
+        if (type === "image") {
+            const preferUrl = config.inboundImagePreferUrl !== false;
+            const urlCandidate = preferUrl ? (kv.url || kv.file) : (kv.file || kv.url);
+            const url = decodeHtmlEntities(String(urlCandidate || "").trim());
+            if (url) {
+                imageUrls.push(url);
+            }
+        } else if (type === "record") {
+            const url = decodeHtmlEntities(String(kv.url || kv.file || "").trim());
+            if (url) {
+                audioUrls.push(url);
+            }
+        } else {
+            // 保留非媒体 CQ 段（例如 @ 提醒等）
+            clean += match[0];
+        }
+    }
+
+    clean += rawText.slice(lastIndex);
+    const normalizedText = clean.trim();
+
+    if (imageUrls.length > 0 || audioUrls.length > 0) {
+        console.log(`[NapCat] Parsed media from message: images=${imageUrls.length}, audios=${audioUrls.length}`);
+    }
+
+    return {
+        text: normalizedText,
+        imageUrls,
+        audioUrls,
+    };
+}
+
+function getInboundMediaDir(config: any): string {
+    const baseDirRaw = String(config.inboundMediaDir || "./workspace/napcat-inbound-media").trim() || "./workspace/napcat-inbound-media";
+    return resolve(baseDirRaw);
+}
+
+function extFromContentType(contentType: string): string {
+    const normalized = String(contentType || "").toLowerCase();
+    if (normalized.includes("image/png")) return ".png";
+    if (normalized.includes("image/jpeg")) return ".jpg";
+    if (normalized.includes("image/gif")) return ".gif";
+    if (normalized.includes("image/webp")) return ".webp";
+    if (normalized.includes("audio/wav")) return ".wav";
+    if (normalized.includes("audio/mpeg")) return ".mp3";
+    if (normalized.includes("audio/ogg")) return ".ogg";
+    return "";
+}
+
+function normalizeInboundMediaType(contentType: string): string {
+    const normalized = String(contentType || "").toLowerCase();
+    if (normalized.startsWith("image/")) return "image";
+    if (normalized.startsWith("audio/")) return "audio";
+    return normalized || "file";
+}
+
+async function downloadInboundMedia(urls: string[], kind: "image" | "audio", config: any): Promise<DownloadedMedia> {
+    const result: DownloadedMedia = { paths: [], types: [] };
+    if (!Array.isArray(urls) || urls.length === 0) return result;
+
+    const mediaDir = getInboundMediaDir(config);
+    await mkdir(mediaDir, { recursive: true });
+
+    for (const rawUrl of urls) {
+        const mediaUrl = String(rawUrl || "").trim();
+        if (!mediaUrl || (!mediaUrl.startsWith("http://") && !mediaUrl.startsWith("https://"))) continue;
+
+        try {
+            const response = await fetch(mediaUrl);
+            if (!response.ok) {
+                console.warn(`[NapCat] Failed to download inbound ${kind}: ${response.status} ${mediaUrl}`);
+                continue;
+            }
+
+            const contentType = response.headers.get("content-type") || (kind === "image" ? "image/png" : "application/octet-stream");
+            const ext = extFromContentType(contentType) || extname(new URL(mediaUrl).pathname) || (kind === "image" ? ".img" : ".bin");
+            const filePath = resolve(mediaDir, `${Date.now()}-${randomUUID()}${ext}`);
+            const buffer = Buffer.from(await response.arrayBuffer());
+            await writeFile(filePath, buffer);
+            result.paths.push(filePath);
+            result.types.push(normalizeInboundMediaType(contentType));
+        } catch (err) {
+            console.warn(`[NapCat] Failed to download inbound ${kind}: ${mediaUrl}`, err);
+        }
+    }
+
+    return result;
+}
+
 export async function handleNapCatInboundBody(body: any): Promise<void> {
     const config = getNapCatConfig();
     const events = extractNapCatEvents(body);
@@ -510,10 +655,17 @@ export async function handleNapCatInboundBody(body: any): Promise<void> {
     route.agentId = effectiveAgentId;
     route.sessionKey = sessionKey;
 
-    const ctxPayload = {
-        Body: text,
+    const parsedMedia = parseCqMedia(text, config);
+    const mediaImageUrls = parsedMedia.imageUrls || [];
+    const mediaAudioUrls = parsedMedia.audioUrls || [];
+    const finalText = parsedMedia.text || text;
+    const downloadedImages = await downloadInboundMedia(mediaImageUrls, "image", config);
+    const downloadedAudios = await downloadInboundMedia(mediaAudioUrls, "audio", config);
+
+    const ctxPayload: any = {
+        Body: finalText,
         RawBody: rawText,
-        CommandBody: text,
+        CommandBody: finalText,
         From: `napcat:${conversationId}`,
         To: "me",
         SessionKey: sessionKey,
@@ -537,6 +689,28 @@ export async function handleNapCatInboundBody(body: any): Promise<void> {
         OriginatingChannel: "napcat",
         OriginatingTo: conversationId,
     };
+
+    if (mediaImageUrls.length > 0) {
+        ctxPayload.MediaUrls = mediaImageUrls;
+        ctxPayload.MediaUrl = mediaImageUrls[0];
+        ctxPayload.ImageUrls = mediaImageUrls;
+        ctxPayload.Images = mediaImageUrls.map((url: string) => ({ type: "image", url }));
+    }
+
+    if (mediaAudioUrls.length > 0) {
+        ctxPayload.AudioUrls = mediaAudioUrls;
+        ctxPayload.Audios = mediaAudioUrls.map((url: string) => ({ type: "audio", url }));
+    }
+
+    const mediaPaths = [...downloadedImages.paths, ...downloadedAudios.paths];
+    const mediaTypes = [...downloadedImages.types, ...downloadedAudios.types];
+    if (mediaPaths.length > 0) {
+        ctxPayload.MediaPaths = mediaPaths;
+        ctxPayload.MediaPath = mediaPaths[0];
+        ctxPayload.MediaTypes = mediaTypes;
+        ctxPayload.MediaType = mediaTypes[0] || "file";
+        console.log(`[NapCat] Prepared local media files for OpenClaw: count=${mediaPaths.length}`);
+    }
 
     let dispatcher = null;
     if (runtime.channel.reply.createReplyDispatcherWithTyping) {

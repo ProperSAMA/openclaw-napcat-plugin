@@ -184,6 +184,24 @@ export const napcatPlugin = {
                 description: "Timeout waiting action response in WS modes",
                 default: 10000
             },
+            inboundImageEnabled: {
+                type: "boolean",
+                title: "Enable Inbound Image Parsing",
+                description: "When enabled, parse CQ:image/CQ:record from inbound messages into media fields",
+                default: true
+            },
+            inboundImagePreferUrl: {
+                type: "boolean",
+                title: "Prefer CQ URL For Inbound Images",
+                description: "When true, prefer CQ url field over file id when building inbound image URLs",
+                default: true
+            },
+            inboundMediaDir: {
+                type: "string",
+                title: "Inbound Media Cache Directory",
+                description: "Directory used to cache inbound media files locally before passing to OpenClaw",
+                default: "./workspace/napcat-inbound-media"
+            },
             agentId: {
                 type: "string",
                 title: "Fixed Agent ID",

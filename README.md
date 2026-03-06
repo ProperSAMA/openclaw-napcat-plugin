@@ -47,6 +47,9 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
       "wsHeartbeatMs": 30000,
       "wsReconnectMs": 30000,
       "wsRequestTimeoutMs": 10000,
+      "inboundMediaDir": "./workspace/napcat-inbound-media",
+      "inboundImageEnabled": true,
+      "inboundImagePreferUrl": true,
       "allowUsers": [
         "123456789",
         "987654321"
@@ -93,6 +96,11 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
 | `publicBaseUrl` | string | OpenClaw 对 NapCat 可达的地址（如 `http://127.0.0.1:18789`） | `""` |
 | `mediaProxyToken` | string | 媒体代理可选访问令牌 | `""` |
 | `voiceBasePath` | string | 相对语音文件名的基础目录（例如 `/tmp/napcat-voice`） | `""` |
+| `enableInboundLogging` | boolean | 是否记录入站消息日志 | `true` |
+| `inboundLogDir` | string | 入站日志目录 | `"./logs/napcat-inbound"` |
+| `inboundImageEnabled` | boolean | 是否解析入站 CQ:image/CQ:record 为多模态输入 | `true` |
+| `inboundImagePreferUrl` | boolean | 解析图片时是否优先使用 CQ 中的 `url` 字段（否则优先 `file`） | `true` |
+| `inboundMediaDir` | string | 入站媒体本地缓存目录，插件会先下载到这里再交给 OpenClaw | `"./workspace/napcat-inbound-media"` |
 
 **群消息说明：**
 - `enableGroupMessages: false`（默认）：完全忽略群消息
@@ -177,6 +185,27 @@ OpenClaw 示例：
 ```
 
 两种方式都建议先确保容器间网络互通，再切换生产配置。
+
+## 入站图片识别说明
+
+当 QQ 通过 NapCat 发送图片（`[CQ:image,...]`）或语音（`[CQ:record,...]`）时：
+
+- 插件会在入站阶段解析 CQ 段：
+  - 提取 `url` / `file`，生成图片/音频 URL 列表
+  - 将纯文本中的图片 CQ 片段剥离，只保留用户正文
+- 为了兼容容器环境与远程模型取图限制，插件会优先把入站图片/语音下载到 OpenClaw 本地缓存目录，再通过 `MediaPath` / `MediaPaths` / `MediaType` / `MediaTypes` 交给 OpenClaw。
+- 解析结果会注入到 OpenClaw 上下文中，例如：
+  - `MediaUrls` / `MediaUrl`
+  - `ImageUrls` / `Images`
+  - `MediaPath` / `MediaPaths`
+  - `MediaType` / `MediaTypes`
+  - `AudioUrls` / `Audios`
+- 上层 agent 会把这些媒体作为多模态输入交给模型，从而真正看到图片/语音，而不是只看到 `[CQ:image,...]` 这一串文本。
+
+相关配置：
+
+- `inboundImageEnabled`: 控制是否启用入站 CQ 媒体解析（默认启用）
+- `inboundImagePreferUrl`: 控制在 CQ 同时提供 `url` 和 `file` 时优先使用哪一个（默认优先 `url`）
 
 ## 发送消息说明
 
