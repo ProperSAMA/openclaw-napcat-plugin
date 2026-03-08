@@ -15,6 +15,10 @@ export function normalizeNapCatTarget(raw: string): string {
     if (sessionMatch) {
         return `session:napcat:${sessionMatch[1].toLowerCase()}:${sessionMatch[2]}`;
     }
+    const agentSessionMatch = withoutProvider.match(/^agent:[^:]+:session:napcat:(private|group):(\d+)$/i);
+    if (agentSessionMatch) {
+        return `session:napcat:${agentSessionMatch[1].toLowerCase()}:${agentSessionMatch[2]}`;
+    }
     const directMatch = withoutProvider.match(/^(private|group):(\d+)$/i);
     if (directMatch) {
         return `${directMatch[1].toLowerCase()}:${directMatch[2]}`;
@@ -29,6 +33,7 @@ export function looksLikeNapCatTargetId(raw: string, normalized?: string): boole
     const target = (normalized || raw).trim();
     return (
         /^action:[a-z0-9_.-]+$/i.test(target) ||
+        /^agent:[^:]+:session:napcat:(private|group):\d+$/i.test(target) ||
         /^session:napcat:(private|group):\d+$/i.test(target) ||
         /^(private|group):\d+$/i.test(target) ||
         /^\d+$/.test(target)

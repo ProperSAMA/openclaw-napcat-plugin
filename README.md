@@ -172,6 +172,12 @@ git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
 - HTTP/WS 均支持 `token` 鉴权（同时发送 `Authorization: Bearer <token>` 与 `access_token` 查询参数）。
 - `wsReconnectMs` 仅 `ws-client` 使用；`ws-server` 模式无重连参数（由 NapCat 客户端负责重连）。
 
+### 定时任务与传输模式
+
+- **`transport: "http"`**：发消息时每次对 NapCat 的 HTTP 端口（如 3000）发起独立请求，不依赖长连接。网关侧对 napcat 通道的健康检查也与连接状态解耦，定时任务（cron）触发时通常能稳定投递。
+- **`transport: "ws-client"`**：发消息走 WebSocket，依赖 OpenClaw 到 NapCat 的 WS 长连接。网关的 health-monitor 会因“通道进程/连接停止”而反复重启 napcat 通道（日志中可见 `[napcat] [default] auto-restart attempt N/10`）。若定时任务恰好在重启窗口或 WS 未就绪时执行，可能报错或投递失败。
+- **建议**：若定时任务必须稳定成功，优先使用 `transport: "http"`，并在 NapCat 侧同时启用 HTTP 服务器（如 3000）和 HTTP 客户端（指向 OpenClaw 的 `/napcat`）。若需使用 `ws-client`，可排查网关侧为何将 napcat 判为 stopped（例如 WS 断开或通道进程退出），待通道稳定后再依赖定时任务。
+
 ## NapCat 配置（HTTP）
 
 在 NapCat 网络配置界面新建以下网络配置并启用：
@@ -280,14 +286,21 @@ OpenClaw 示例：
 为了确保正确路由，请明确指定 `channel: "napcat"`，并使用以下目标格式：
 
 私聊目标
+- `agent:<agentId>:session:napcat:private:<QQ号>`（当前会话优先）
 - `private:<QQ号>`
 - `session:napcat:private:<QQ号>`
 
 群聊目标
+- `agent:<agentId>:session:napcat:group:<群号>`（当前会话优先）
 - `group:<群号>`
 - `session:napcat:group:<群号>`
 
-注意：纯数字 `target` 会被当作私聊用户 ID，群聊请务必加上 `group:` 或 `session:napcat:group:` 前缀。
+注意：
+
+- 若当前上下文里已经给出 `ConversationLabel` / `SessionKey`，优先直接复用 `agent:<agentId>:session:napcat:*` 这个完整会话标签。
+- 纯数字 `target` 会被当作私聊用户 ID，群聊请务必加上 `group:` 或 `session:napcat:group:` 前缀。
+- 不要使用旧的 `agent:<agentId>:napcat:group:<群号>` / `agent:<agentId>:napcat:private:<QQ号>` 标签，它不代表当前 NapCat 会话上下文。
+- 调用 `message` 工具发送时必须传 `target`；不要只传 `groupId` 或 `userId`。
 
 ## 通用 NapCat Action 调用
 

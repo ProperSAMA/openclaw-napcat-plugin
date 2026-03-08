@@ -25,7 +25,7 @@ export const napcatPlugin = {
         normalizeTarget: normalizeNapCatTarget,
         targetResolver: {
             looksLikeId: looksLikeNapCatTargetId,
-            hint: "private:<QQ号> / group:<群号> / session:napcat:private:<QQ号> / session:napcat:group:<群号> / action:<NapCat接口名>",
+            hint: "优先使用 agent:<agentId>:session:napcat:(private|group):<id>；也支持 session:napcat:private:<QQ号> / session:napcat:group:<群号> / private:<QQ号> / group:<群号> / action:<NapCat接口名>。不要使用纯数字 target，也不要使用旧的 agent:<agentId>:napcat:* 标签。",
         },
     },
     configSchema: napcatChannelConfigSchema,
