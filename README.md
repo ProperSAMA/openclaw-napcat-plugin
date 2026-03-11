@@ -540,6 +540,37 @@ test.wav
 
 ---
 
+## 按昵称或备注找 QQ / 群
+
+issue #3 对应的改动已经包含在仓库里：现在提供了一个简单的联系人搜索脚本，适合配合 `skill/napcat-qq` 一起用。
+
+脚本路径：
+
+```bash
+skill/napcat-qq/scripts/qq-contact-search.js
+```
+
+用法：
+
+```bash
+node skill/napcat-qq/scripts/qq-contact-search.js 小明
+node skill/napcat-qq/scripts/qq-contact-search.js 测试群 group
+node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
+```
+
+说明：
+
+- 第一个参数是关键词
+- 第二个参数可选：`private` / `group` / `all`
+- 默认会去 NapCat 的 `get_friend_list` / `get_group_list` 做简单模糊匹配
+- 可通过环境变量覆盖连接信息：
+  - `NAPCAT_URL`
+  - `NAPCAT_TOKEN`
+
+返回结果是 JSON，里面的 `candidates` 会列出匹配到的联系人或群，供 skill 再决定是直接发送、让用户选号，还是继续追问。
+
+---
+
 ## 完整配置示例
 
 如果你想一次把常用项都配好，可以参考下面这份：
@@ -671,6 +702,8 @@ openclaw-napcat-plugin/
 │   └── webhook.ts        # 接收 NapCat webhook
 └── skill/
     └── napcat-qq         # 配套 skill
+        └── scripts/
+            └── qq-contact-search.js
 ```
 
 ---
