@@ -284,6 +284,216 @@ function sanitizeLogToken(raw: string): string {
     return String(raw || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
+function extractNapCatMessageSegments(input: any): any[] {
+    if (Array.isArray(input)) {
+        return input.filter((item) => item && typeof item === "object");
+    }
+    if (input && typeof input === "object" && typeof input.type === "string") {
+        return [input];
+    }
+    if (typeof input === "string") {
+        return [{ type: "text", data: { text: input } }];
+    }
+    return [];
+}
+
+function extractForwardEntries(input: any): any[] {
+    if (!input) return [];
+    if (Array.isArray(input)) {
+        return input.filter((item) => item && typeof item === "object");
+    }
+    if (typeof input !== "object") return [];
+
+    const candidates = [
+        input.messages,
+        input.message,
+        input.content,
+        input.data?.messages,
+        input.data?.message,
+        input.data?.content,
+    ];
+
+    for (const candidate of candidates) {
+        if (Array.isArray(candidate)) {
+            return candidate.filter((item) => item && typeof item === "object");
+        }
+    }
+    return [];
+}
+
+function formatInlineSegmentLabel(prefix: string, value?: string): string {
+    const normalizedValue = String(value || "").trim();
+    return normalizedValue ? `[${prefix}:${normalizedValue}]` : `[${prefix}]`;
+}
+
+function normalizeRenderedMessageText(text: string): string {
+    return text
+        .replace(/\r\n/g, "\n")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
+async function fetchNapCatForwardEntries(
+    forwardId: string,
+    config: any,
+    cache: Map<string, any[] | null>
+): Promise<any[] | null> {
+    const normalizedId = String(forwardId || "").trim();
+    if (!normalizedId) return null;
+    if (cache.has(normalizedId)) {
+        return cache.get(normalizedId) ?? null;
+    }
+
+    const baseUrl = String(config.url || "http://127.0.0.1:3000").trim().replace(/\/+$/, "");
+    const token = String(config.token || "").trim();
+
+    try {
+        const result = await sendToNapCat(`${baseUrl}/get_forward_msg`, { message_id: normalizedId }, token);
+        const entries = extractForwardEntries(result?.data ?? result);
+        cache.set(normalizedId, entries.length > 0 ? entries : null);
+        return cache.get(normalizedId) ?? null;
+    } catch (err) {
+        console.error(`[NapCat] Failed to fetch forward message ${normalizedId}:`, err);
+        cache.set(normalizedId, null);
+        return null;
+    }
+}
+
+async function renderNapCatSegmentsToText(
+    segments: any[],
+    config: any,
+    cache: Map<string, any[] | null>,
+    depth = 0
+): Promise<string> {
+    if (!Array.isArray(segments) || segments.length === 0) return "";
+    if (depth > 3) return "[合并转发嵌套过深]";
+
+    let output = "";
+    for (const segment of segments) {
+        output += await renderNapCatSegmentToText(segment, config, cache, depth);
+    }
+    return normalizeRenderedMessageText(output);
+}
+
+async function renderNapCatForwardNode(
+    node: any,
+    config: any,
+    cache: Map<string, any[] | null>,
+    depth: number
+): Promise<string> {
+    const rawNode = node?.data && typeof node.data === "object" ? node.data : node;
+    const senderName = String(
+        rawNode?.nickname ||
+        rawNode?.name ||
+        rawNode?.sender?.nickname ||
+        rawNode?.user_name ||
+        rawNode?.user_id ||
+        "未知发送者"
+    ).trim();
+
+    let contentText = "";
+    const contentSegments = extractNapCatMessageSegments(
+        rawNode?.content ?? rawNode?.message ?? rawNode?.messages
+    );
+    if (contentSegments.length > 0) {
+        contentText = await renderNapCatSegmentsToText(contentSegments, config, cache, depth + 1);
+    } else if (typeof rawNode?.content === "string") {
+        contentText = normalizeRenderedMessageText(rawNode.content);
+    } else if (typeof rawNode?.message === "string") {
+        contentText = normalizeRenderedMessageText(rawNode.message);
+    } else if (typeof rawNode?.raw_message === "string") {
+        contentText = normalizeRenderedMessageText(rawNode.raw_message);
+    }
+
+    return `${senderName}: ${contentText || "[空消息]"}`;
+}
+
+async function renderNapCatForwardEntries(
+    entries: any[],
+    config: any,
+    cache: Map<string, any[] | null>,
+    depth: number
+): Promise<string> {
+    if (!Array.isArray(entries) || entries.length === 0) {
+        return "[合并转发]\n[未能读取转发内容]";
+    }
+
+    const lines: string[] = ["[合并转发]"];
+    for (const entry of entries) {
+        lines.push(await renderNapCatForwardNode(entry, config, cache, depth + 1));
+    }
+    return lines.join("\n");
+}
+
+async function renderNapCatSegmentToText(
+    segment: any,
+    config: any,
+    cache: Map<string, any[] | null>,
+    depth: number
+): Promise<string> {
+    const type = String(segment?.type || "").trim().toLowerCase();
+    const data = segment?.data && typeof segment.data === "object" ? segment.data : {};
+
+    switch (type) {
+        case "text":
+            return String(data.text || "");
+        case "at":
+            return data.qq === "all" ? "@全体成员" : `@${String(data.qq || "").trim()}`;
+        case "face":
+            return formatInlineSegmentLabel("表情", String(data.summary || data.id || "").trim());
+        case "image":
+        case "mface":
+            return formatInlineSegmentLabel("图片", String(data.summary || data.name || "").trim());
+        case "record":
+            return formatInlineSegmentLabel("语音", String(data.name || "").trim());
+        case "video":
+            return formatInlineSegmentLabel("视频", String(data.name || "").trim());
+        case "file":
+            return formatInlineSegmentLabel("文件", String(data.name || data.file || "").trim());
+        case "reply":
+            return formatInlineSegmentLabel("回复", String(data.id || "").trim());
+        case "json":
+            return "[JSON消息]";
+        case "markdown":
+            return String(data.content || data.markdown || "[Markdown消息]");
+        case "contact":
+            return formatInlineSegmentLabel("名片", String(data.id || data.type || "").trim());
+        case "location":
+            return formatInlineSegmentLabel("位置", String(data.title || data.address || "").trim());
+        case "music":
+            return formatInlineSegmentLabel("音乐", String(data.title || data.id || data.type || "").trim());
+        case "share":
+            return formatInlineSegmentLabel("分享", String(data.title || data.url || "").trim());
+        case "lightapp":
+            return "[小程序卡片]";
+        case "forward": {
+            const inlineEntries = extractForwardEntries(data);
+            const forwardId = String(data.id || "").trim();
+            const entries = inlineEntries.length > 0
+                ? inlineEntries
+                : await fetchNapCatForwardEntries(forwardId, config, cache);
+            if (!entries || entries.length === 0) {
+                return forwardId ? `[合并转发:${forwardId}]` : "[合并转发]";
+            }
+            return `\n${await renderNapCatForwardEntries(entries, config, cache, depth)}\n`;
+        }
+        default:
+            return type ? `[${type}]` : "";
+    }
+}
+
+async function buildInboundMessageText(event: any, config: any): Promise<string> {
+    const segments = extractNapCatMessageSegments(event?.message);
+    if (segments.length === 0) {
+        return normalizeRenderedMessageText(String(event?.raw_message || ""));
+    }
+
+    const cache = new Map<string, any[] | null>();
+    const rendered = await renderNapCatSegmentsToText(segments, config, cache);
+    return rendered || normalizeRenderedMessageText(String(event?.raw_message || ""));
+}
+
 function getInboundLogFilePath(body: any, config: any): string {
     const isGroup = body?.message_type === "group";
     const baseDirRaw = String(config.inboundLogDir || "./logs/napcat-inbound").trim() || "./logs/napcat-inbound";
@@ -403,7 +613,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                 console.warn(`[NapCat] WARNING: user_id is not numeric: ${senderId}`);
             }
             const rawText = event.raw_message || "";
-            let text = rawText;
+            let text = await buildInboundMessageText(event, config);
 
             // Get allowUsers from config
             const allowUsers = config.allowUsers || [];
@@ -458,7 +668,8 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                     const mentionPatternPlain1 = new RegExp(`@[^\\s]+ \\(${botId}\\)`, 'i');
                     const mentionPatternPlain2 = new RegExp(`@${botId}(?:\\s|$|,)`, 'i');
 
-                    const isMentionedCQ = mentionPatternCQ.test(text) || allMentionPatternCQ.test(text);
+                    const mentionSource = rawText || text;
+                    const isMentionedCQ = mentionPatternCQ.test(mentionSource) || allMentionPatternCQ.test(mentionSource);
                     const isMentionedPlain = mentionPatternPlain1.test(text) || mentionPatternPlain2.test(text);
 
                     if (!isMentionedCQ && !isMentionedPlain) {
@@ -478,7 +689,8 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         const allMentionPatternCQ = /\[CQ:at,qq=all\]/i;
                         const mentionPatternPlain1 = new RegExp(`@[^\\s]+ \\(${botId}\\)`, 'i');
                         const mentionPatternPlain2 = new RegExp(`@${botId}(?:\\s|$|,)`, 'i');
-                        wasMentioned = mentionPatternCQ.test(text) || allMentionPatternCQ.test(text) || 
+                        const mentionSource = rawText || text;
+                        wasMentioned = mentionPatternCQ.test(mentionSource) || allMentionPatternCQ.test(mentionSource) || 
                                        mentionPatternPlain1.test(text) || mentionPatternPlain2.test(text);
                     }
                 }
@@ -487,9 +699,16 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                 if (botId) {
                     const stripCQ = new RegExp(`^\\[CQ:at,qq=${botId}\\]\\s*`, 'i');
                     const stripAll = /^\[CQ:at,qq=all\]\s*/i;
+                    const stripAllPlain = /^@全体成员\s*/i;
                     const stripPlain1 = new RegExp(`^@[^\\s]+ \\(${botId}\\)\\s*`, 'i');
                     const stripPlain2 = new RegExp(`^@${botId}(?:\\s|$|,)\\s*`, 'i');
-                    text = text.replace(stripCQ, '').replace(stripAll, '').replace(stripPlain1, '').replace(stripPlain2, '').trim();
+                    text = text
+                        .replace(stripCQ, '')
+                        .replace(stripAll, '')
+                        .replace(stripAllPlain, '')
+                        .replace(stripPlain1, '')
+                        .replace(stripPlain2, '')
+                        .trim();
                 }
             }
 
@@ -600,7 +819,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                             console.log("[NapCat] Skip empty reply payload");
                             return;
                         }
-                        const msgPayload = { message };
+                        const msgPayload: Record<string, string> = { message };
                         if (isGroup) msgPayload.group_id = targetId;
                         else msgPayload.user_id = targetId;
                         
@@ -640,7 +859,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                             console.log("[NapCat] Skip empty reply payload");
                             return;
                         }
-                        const msgPayload = { message };
+                        const msgPayload: Record<string, string> = { message };
                         if (isGroup) msgPayload.group_id = targetId;
                         else msgPayload.user_id = targetId;
                         
