@@ -606,6 +606,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
         if (event.post_type === "message") {
             const runtime = getNapCatRuntime();
             const isGroup = event.message_type === "group";
+            const groupId = isGroup ? String(event.group_id || "") : "";
             // Ensure senderId is numeric string
             const senderId = String(event.user_id);
             // Safety check: if senderId looks like a name (non-numeric), log warning
@@ -633,12 +634,23 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             // Group message handling
             const enableGroupMessages = config.enableGroupMessages || false;
             const groupMentionOnly = config.groupMentionOnly !== false; // Default true
+            const groupWhitelist = Array.isArray(config.groupWhitelist)
+                ? config.groupWhitelist.map((id: any) => String(id).trim()).filter(Boolean)
+                : [];
             let wasMentioned = !isGroup; // In DMs, we consider it "mentioned"
 
             if (isGroup) {
                 if (!enableGroupMessages) {
                     // Group messages disabled - ignore
                     console.log(`[NapCat] Ignoring group message (group messages disabled)`);
+                    res.statusCode = 200;
+                    res.setHeader("Content-Type", "application/json");
+                    res.end('{"status":"ok"}');
+                    return true;
+                }
+
+                if (groupWhitelist.length > 0 && !groupWhitelist.includes(groupId)) {
+                    console.log(`[NapCat] Ignoring group message from ${groupId} (not in group whitelist)`);
                     res.statusCode = 200;
                     res.setHeader("Content-Type", "application/json");
                     res.end('{"status":"ok"}');

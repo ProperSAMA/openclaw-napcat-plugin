@@ -127,6 +127,7 @@ openclaw plugins install /Users/yourname/Documents/openclaw-napcat-plugin
       "url": "http://127.0.0.1:3000",
       "streaming_mode": false,
       "enableGroupMessages": true,
+      "groupWhitelist": [],
       "groupMentionOnly": true
     }
   },
@@ -148,6 +149,7 @@ openclaw plugins install /Users/yourname/Documents/openclaw-napcat-plugin
 - NapCat 的 HTTP 服务地址是 `http://127.0.0.1:3000`
 - `streaming_mode` 为 `true` 时会改成流式回复，每处理一步就发一条 QQ 消息
 - 允许处理群消息
+- `groupWhitelist` 留空时不过滤群；填了之后只响应指定群
 - 但群里必须 **@ 机器人** 才会回复
 
 ---
@@ -229,6 +231,32 @@ http://192.168.1.10:18789/napcat
 
 ---
 
+## 如果你只想让特定群能用
+
+你可以配置群白名单：
+
+```json
+{
+  "channels": {
+    "napcat": {
+      "enabled": true,
+      "url": "http://127.0.0.1:3000",
+      "enableGroupMessages": true,
+      "groupWhitelist": ["123456789", "987654321"],
+      "groupMentionOnly": true
+    }
+  }
+}
+```
+
+这表示：
+
+- `groupWhitelist` 为空时，不按群号过滤
+- `groupWhitelist` 不为空时，只处理白名单里的群消息
+- 它和 `allowUsers`、`enableGroupMessages`、`groupMentionOnly` 可以同时使用
+
+---
+
 ## 群聊怎么工作？
 
 群消息有 3 种常见模式：
@@ -250,12 +278,14 @@ http://192.168.1.10:18789/napcat
 ```json
 {
   "enableGroupMessages": true,
+  "groupWhitelist": ["123456789", "987654321"],
   "groupMentionOnly": true
 }
 ```
 
 适合：大多数群聊场景。  
-这样不会因为群里有人聊天就一直触发机器人。
+这样不会因为群里有人聊天就一直触发机器人。  
+如果再配上 `groupWhitelist`，就可以进一步限制只在指定群里生效。
 
 ---
 
@@ -264,12 +294,14 @@ http://192.168.1.10:18789/napcat
 ```json
 {
   "enableGroupMessages": true,
+  "groupWhitelist": ["123456789"],
   "groupMentionOnly": false
 }
 ```
 
 适合：你非常确定自己需要“全群监听”。  
-否则容易太吵，也更容易误触发。
+否则容易太吵，也更容易误触发。  
+如果只想监听少数几个群，建议同时配置 `groupWhitelist`。
 
 ---
 
@@ -587,6 +619,7 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
       "url": "http://127.0.0.1:3000",
       "allowUsers": ["123456789", "987654321"],
       "enableGroupMessages": true,
+      "groupWhitelist": ["123456789", "987654321"],
       "groupMentionOnly": true,
       "mediaProxyEnabled": true,
       "publicBaseUrl": "http://127.0.0.1:18789",
@@ -623,6 +656,7 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
 | `agentId` | string | 固定把消息交给哪个 OpenClaw agent 处理 | `""` |
 | `allowUsers` | string[] | 只允许这些 QQ 号触发机器人；空数组表示不过滤 | `[]` |
 | `enableGroupMessages` | boolean | 是否处理群消息 | `false` |
+| `groupWhitelist` | string[] | 只允许这些群号触发机器人；空数组表示不过滤群 | `[]` |
 | `streaming_mode` | boolean | 是否启用流式传输模式；开启后会按处理步骤连续发送 QQ 消息 | `false` |
 | `groupMentionOnly` | boolean | 群里是否必须 @ 机器人才处理 | `true` |
 | `mediaProxyEnabled` | boolean | 是否开启媒体代理，解决跨机器图片/语音发送问题 | `false` |
@@ -645,6 +679,7 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
 先检查：
 
 - `enableGroupMessages` 有没有设成 `true`
+- `groupWhitelist` 有没有把当前群拦掉
 - `groupMentionOnly` 是否开启
 - 你在群里有没有真的 @ 到机器人
 - `allowUsers` 有没有把发消息的人拦掉

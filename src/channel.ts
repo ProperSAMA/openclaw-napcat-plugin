@@ -147,6 +147,13 @@ export const napcatPlugin = {
                 description: "Only accept messages from these QQ user IDs (empty = accept all)",
                 default: []
             },
+            groupWhitelist: {
+                type: "array",
+                items: { type: "string" },
+                title: "Group Whitelist",
+                description: "Only accept messages from these QQ group IDs when non-empty",
+                default: []
+            },
             enableGroupMessages: {
                 type: "boolean",
                 title: "Enable Group Messages",
