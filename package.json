@@ -1,10 +1,46 @@
 {
-  "name": "@openclaw/napcat",
-  "version": "1.0.0",
+  "name": "@propersama/openclaw-napcat",
+  "version": "1.0.2",
+  "private": false,
+  "description": "QQ chat channel plugin for OpenClaw via NapCat (OneBot 11)",
   "type": "module",
+  "files": [
+    "index.ts",
+    "src",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE.md",
+    "skill",
+    "!skill/napcat-qq/scripts/qq-contact-search.js"
+  ],
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "napcat",
+    "qq",
+    "onebot11"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.4.1"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "openclaw": "^2026.4.1"
+  },
   "openclaw": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "install": {
+      "npmSpec": "@propersama/openclaw-napcat",
+      "minHostVersion": ">=2026.4.1"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
