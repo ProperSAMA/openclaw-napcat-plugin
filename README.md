@@ -70,32 +70,25 @@
 
 如果你只想尽快跑通，先按这个最小方案来。
 
-### 第 1 步：获取项目
+### 第 1 步：安装插件
 
-你可以 clone 仓库，或者直接下载 ZIP。
-
-```bash
-git clone https://github.com/ProperSAMA/openclaw-napcat-plugin.git
-```
-
-记住你下载后的项目路径，比如：
+推荐直接按 **npm 包名** 安装：
 
 ```bash
-/Users/yourname/Documents/openclaw-napcat-plugin
+openclaw plugins install @propersama/openclaw-napcat
 ```
+
+如果你后面改成了自己的 npm scope，就把上面的包名替换成你实际发布的那个名字。
 
 ---
 
-### 第 2 步：安装插件
+### 第 2 步：确认插件已启用
+
+如果这是首次安装，通常 OpenClaw 会把它登记到插件列表里。  
+你也可以显式确认一下：
 
 ```bash
-openclaw plugins install <项目路径>
-```
-
-例如：
-
-```bash
-openclaw plugins install /Users/yourname/Documents/openclaw-napcat-plugin
+openclaw plugins enable napcat
 ```
 
 ---
