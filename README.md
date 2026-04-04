@@ -100,6 +100,12 @@ openclaw plugins enable napcat
 
 如果你已经有自己的技能目录管理方式，也可以按你的习惯来。
 
+注意：
+
+- 通过 npm 安装插件时，`skill/napcat-qq` 会随包发布
+- 但其中的 `scripts/qq-contact-search.js` 默认**不会**随 npm 包一起安装
+- 如果你需要“按昵称 / 备注 / 群名搜索联系人”的能力，可以按下面“按昵称或备注找 QQ / 群”的说明，手动把这个脚本放回对应的 skill 目录
+
 ---
 
 ### 第 4 步：修改 OpenClaw 配置
@@ -572,10 +578,19 @@ test.wav
 
 issue #3 对应的改动已经包含在仓库里：现在提供了一个简单的联系人搜索脚本，适合配合 `skill/napcat-qq` 一起用。
 
+为了避免 OpenClaw 的安装安全扫描误判，这个脚本默认**不会包含在 npm 发布包里**。  
+如果你是通过 `openclaw plugins install @propersama/openclaw-napcat` 安装的插件，并且想启用联系人搜索，请手动从仓库复制这个文件到本地 skill 目录。
+
 脚本路径：
 
 ```bash
 skill/napcat-qq/scripts/qq-contact-search.js
+```
+
+你可以从仓库拿到这个文件后，放到本地的同名路径，例如：
+
+```bash
+~/.openclaw/skills/napcat-qq/scripts/qq-contact-search.js
 ```
 
 用法：
@@ -766,7 +781,7 @@ openclaw-napcat-plugin/
 └── skill/
     └── napcat-qq         # 配套 skill
         └── scripts/
-            └── qq-contact-search.js
+            └── qq-contact-search.js   # 联系人搜索脚本，npm 包默认不包含，需按需手动安装
 ```
 
 ---

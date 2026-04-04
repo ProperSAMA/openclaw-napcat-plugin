@@ -10,7 +10,8 @@
     "openclaw.plugin.json",
     "README.md",
     "LICENSE.md",
-    "skill"
+    "skill",
+    "!skill/napcat-qq/scripts/qq-contact-search.js"
   ],
   "keywords": [
     "openclaw",
