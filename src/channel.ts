@@ -172,6 +172,12 @@ export const napcatPlugin = {
                 description: "In group chats, only respond when the bot is mentioned (@)",
                 default: true
             },
+            enablePrivateTypingStatus: {
+                type: "boolean",
+                title: "Enable Private Typing Status",
+                description: "Show QQ 'typing' status in private chats while OpenClaw is processing a reply",
+                default: true
+            },
             mediaProxyEnabled: {
                 type: "boolean",
                 title: "Enable Media Proxy",

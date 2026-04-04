@@ -18,6 +18,62 @@ function isNapCatStreamingModeEnabled(config: any): boolean {
     return config?.streaming_mode === true;
 }
 
+function isNapCatPrivateTypingEnabled(config: any): boolean {
+    return config?.enablePrivateTypingStatus !== false;
+}
+
+async function setNapCatPrivateTypingStatus(userId: string, token?: string): Promise<void> {
+    const config = getNapCatConfig();
+    const baseUrl = config.url || "http://127.0.0.1:15150";
+    await sendToNapCat(`${baseUrl}/set_input_status`, {
+        user_id: userId,
+        event_type: 1,
+    }, token);
+}
+
+function createPrivateTypingStatusController(options: {
+    enabled: boolean;
+    userId: string;
+    token?: string;
+    intervalMs?: number;
+}) {
+    const intervalMs = Math.max(1000, options.intervalMs ?? 4000);
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let stopped = false;
+    let inFlight = false;
+
+    const ping = async () => {
+        if (!options.enabled || stopped || inFlight) return;
+        inFlight = true;
+        try {
+            await setNapCatPrivateTypingStatus(options.userId, options.token);
+        } catch (err) {
+            console.error(`[NapCat] Failed to update private typing status for ${options.userId}:`, err);
+        } finally {
+            inFlight = false;
+        }
+    };
+
+    return {
+        start: async () => {
+            if (!options.enabled || stopped) return;
+            await ping();
+            if (!stopped && !timer) {
+                timer = setInterval(() => {
+                    void ping();
+                }, intervalMs);
+            }
+        },
+        stop: () => {
+            stopped = true;
+            if (timer) {
+                clearInterval(timer);
+                timer = null;
+            }
+        }
+    };
+}
+
 const napcatHttpAgent = new HttpAgent({
     keepAlive: true,
     keepAliveMsecs: 10000,
@@ -812,8 +868,11 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             let dispatcherReplyOptions: Record<string, unknown> = {};
             let markDispatchIdle: (() => void) | null = null;
             
-            // Store conversationId for reply routing
-            const replyTarget = conversationId;
+            const typingController = createPrivateTypingStatusController({
+                enabled: !isGroup && isNapCatPrivateTypingEnabled(config),
+                userId: senderId,
+                token: String(config.token || "").trim(),
+            });
             
             if (runtime.channel.reply.createReplyDispatcherWithTyping) {
                 console.log("[NapCat] Calling createReplyDispatcherWithTyping...");
@@ -822,6 +881,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                     responsePrefixContextProvider: () => ({}),
                     humanDelay: 0,
                     deliver: async (payload) => {
+                        typingController.stop();
                         console.log("[NapCat] Reply to deliver:", JSON.stringify(payload).substring(0, 100));
                         // Actually send the message via NapCat API
                         const config = getNapCatConfig();
@@ -848,10 +908,15 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         }
                     },
                     onError: (err, info) => {
+                        typingController.stop();
                         console.error(`[NapCat] Reply error (${info.kind}):`, err);
                     },
-                    onReplyStart: () => {},
-                    onIdle: () => {},
+                    onReplyStart: () => {
+                        typingController.stop();
+                    },
+                    onIdle: () => {
+                        typingController.stop();
+                    },
                 });
                 dispatcher = result.dispatcher;
                 dispatcherReplyOptions = result.replyOptions || {};
@@ -862,6 +927,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                     responsePrefixContextProvider: () => ({}),
                     humanDelay: 0,
                     deliver: async (payload) => {
+                        typingController.stop();
                         console.log("[NapCat] Reply to deliver:", JSON.stringify(payload).substring(0, 100));
                         // Actually send the message via NapCat API
                         const config = getNapCatConfig();
@@ -888,6 +954,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         }
                     },
                     onError: (err, info) => {
+                        typingController.stop();
                         console.error(`[NapCat] Reply error (${info.kind}):`, err);
                     },
                 });
@@ -905,6 +972,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
 
             // Dispatch the message to OpenClaw
             try {
+                await typingController.start();
                 await runtime.channel.reply.dispatchReplyFromConfig({
                     ctx: ctxPayload,
                     cfg,
@@ -915,6 +983,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                     },
                 });
             } finally {
+                typingController.stop();
                 markDispatchIdle?.();
             }
             

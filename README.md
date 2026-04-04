@@ -32,6 +32,7 @@
 - 群文件上传
 - 白名单控制（只允许指定 QQ 号触发）
 - 入站消息日志记录
+- 私聊处理中显示“正在输入”
 
 适合的场景：
 
@@ -126,6 +127,7 @@ openclaw plugins install /Users/yourname/Documents/openclaw-napcat-plugin
       "enabled": true,
       "url": "http://127.0.0.1:15150",
       "streaming_mode": false,
+      "enablePrivateTypingStatus": true,
       "enableGroupMessages": true,
       "groupWhitelist": [],
       "groupMentionOnly": true
@@ -148,6 +150,7 @@ openclaw plugins install /Users/yourname/Documents/openclaw-napcat-plugin
 - 启用 `napcat` 通道
 - NapCat 的 HTTP 服务地址是 `http://127.0.0.1:15150`
 - `streaming_mode` 为 `true` 时会改成流式回复，每处理一步就发一条 QQ 消息
+- `enablePrivateTypingStatus` 为 `true` 时，私聊里 OpenClaw 思考期间会尝试显示 QQ “正在输入”
 - 允许处理群消息
 - `groupWhitelist` 留空时不过滤群；填了之后只响应指定群
 - 但群里必须 **@ 机器人** 才会回复
@@ -658,6 +661,7 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
 | `enableGroupMessages` | boolean | 是否处理群消息 | `false` |
 | `groupWhitelist` | string[] | 只允许这些群号触发机器人；空数组表示不过滤群 | `[]` |
 | `streaming_mode` | boolean | 是否启用流式传输模式；开启后会按处理步骤连续发送 QQ 消息 | `false` |
+| `enablePrivateTypingStatus` | boolean | 是否在私聊处理中调用 NapCat 的输入状态接口，显示 QQ “正在输入” | `true` |
 | `groupMentionOnly` | boolean | 群里是否必须 @ 机器人才处理 | `true` |
 | `mediaProxyEnabled` | boolean | 是否开启媒体代理，解决跨机器图片/语音发送问题 | `false` |
 | `publicBaseUrl` | string | OpenClaw 对 NapCat 可访问的地址 | `""` |
