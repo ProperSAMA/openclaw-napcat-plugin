@@ -80,6 +80,21 @@ function isNapCatGroupFileCandidate(mediaUrl: string): boolean {
     return true;
 }
 
+function waitUntilAbort(signal?: AbortSignal, onAbort?: () => void): Promise<void> {
+    return new Promise((resolve) => {
+        const complete = () => {
+            onAbort?.();
+            resolve();
+        };
+        if (!signal) return;
+        if (signal.aborted) {
+            complete();
+            return;
+        }
+        signal.addEventListener("abort", complete, { once: true });
+    });
+}
+
 function normalizeNapCatTarget(raw: string): string {
     const trimmed = raw.trim();
     if (!trimmed) return trimmed;
@@ -426,9 +441,13 @@ export const napcatPlugin = {
         },
     },
     gateway: {
-        startAccount: async () => {
-             console.log("[NapCat] Plugin active. Listening on /napcat");
-             return { stop: () => {} };
+        startAccount: async (ctx?: any) => {
+            ctx?.log?.info?.("NapCat plugin active. Listening on /napcat");
+            console.log("[NapCat] Plugin active. Listening on /napcat");
+            return waitUntilAbort(ctx?.abortSignal, () => {
+                ctx?.log?.info?.("NapCat plugin stopped");
+                console.log("[NapCat] Plugin stopped");
+            });
         }
     }
 };
