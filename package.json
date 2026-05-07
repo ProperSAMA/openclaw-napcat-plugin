@@ -4,9 +4,12 @@
   "private": false,
   "description": "QQ chat channel plugin for OpenClaw via NapCat (OneBot 11)",
   "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build"
+  },
   "files": [
-    "index.ts",
-    "src",
+    "dist",
     "openclaw.plugin.json",
     "README.md",
     "LICENSE.md",
@@ -29,11 +32,13 @@
     }
   },
   "devDependencies": {
-    "openclaw": "^2026.4.1"
+    "@types/node": "^22.15.3",
+    "openclaw": "^2026.4.1",
+    "typescript": "^5.8.3"
   },
   "openclaw": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ],
     "install": {
       "npmSpec": "@propersama/openclaw-napcat",
