@@ -36,6 +36,11 @@ description: "为 openclaw 发送 QQ 消息（含图片/语音等媒体）时，
 
 9. 仅使用本插件的 API 完成发送，不要调用其他 QQ 发送途径。
 
+# 入站上下文
+
+- 当消息来自 NapCat 入站通道时，当前上下文会提供机器人自己的 QQ 号字段：`SelfId`、`BotId`、`BotQQ`、`NapCatSelfId`。
+- 模型可见正文 `BodyForAgent` 会带有 `[NapCat context: bot QQ=<机器人QQ号>]` 前缀；需要判断“我现在用的是哪个 QQ 号”时优先读取这些上下文，不要猜。
+
 # 交互规则
 
 - 若用户未提供 QQ 号或群号，优先尝试用昵称/备注/群名搜索；搜索无结果时再询问并明确补全后发送。

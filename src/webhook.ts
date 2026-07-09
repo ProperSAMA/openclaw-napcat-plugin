@@ -666,6 +666,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             const groupId = isGroup ? String(event.group_id || "") : "";
             // Ensure senderId is numeric string
             const senderId = String(event.user_id);
+            const botId = String(event.self_id || config.selfId || "").trim();
             // Safety check: if senderId looks like a name (non-numeric), log warning
             if (!/^\d+$/.test(senderId)) {
                 console.warn(`[NapCat] WARNING: user_id is not numeric: ${senderId}`);
@@ -714,7 +715,6 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                     return true;
                 }
 
-                const botId = event.self_id || config.selfId;
                 if (groupMentionOnly) {
                     // Check if bot was mentioned
                     // NapCat sends self_id as the bot's QQ number
@@ -824,6 +824,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
 
             // User requested to use session key as display name for consistency
             const sessionDisplayName = sessionKey;
+            const bodyForAgent = botId ? `[NapCat context: bot QQ=${botId}]\n${text}` : text;
 
             // Log for debugging
             console.log(`[NapCat] Inbound from ${senderId} (session: ${sessionKey}): ${text.substring(0, 50)}...`);
@@ -838,6 +839,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             // Build ctxPayload using runtime methods
             const ctxPayload = {
                 Body: text,
+                BodyForAgent: bodyForAgent,
                 RawBody: rawText,
                 CommandBody: text,
                 From: `napcat:${conversationId}`,
@@ -855,6 +857,10 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                 ConversationLabel: sessionKey,
                 SenderName: senderName,
                 SenderId: senderId,
+                SelfId: botId,
+                BotId: botId,
+                BotQQ: botId,
+                NapCatSelfId: botId,
                 Provider: "napcat",
                 Surface: "napcat",
                 MessageSid: messageId,
