@@ -717,6 +717,27 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
 
 ---
 
+### Agent 怎么知道自己用的是哪个 QQ 号
+
+NapCat 入站事件会带上机器人自己的 QQ 号（`self_id`）。插件会优先使用这个值，缺失时回退到配置里的 `selfId`。
+
+在交给 OpenClaw agent 的当前消息上下文里，插件会提供这些字段：
+
+- `SelfId`
+- `BotId`
+- `BotQQ`
+- `NapCatSelfId`
+
+同时，模型可见的 `BodyForAgent` 会在原消息前追加一行：
+
+```text
+[NapCat context: bot QQ=<机器人QQ号>]
+```
+
+这样 agent 在同一个 QQ 群里处理消息时，也能明确知道“我现在是哪个 QQ 号”。
+
+---
+
 ### 如果想按群路由到不同 agent
 
 现在 NapCat 插件会把会话信息作为 `peer` 传给 OpenClaw 的路由器，你可以在 `openclaw.json` 里用 `bindings` 为特定群指定 agent：
