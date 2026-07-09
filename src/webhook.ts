@@ -973,15 +973,23 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             // Dispatch the message to OpenClaw
             try {
                 await typingController.start();
-                await runtime.channel.reply.dispatchReplyFromConfig({
-                    ctx: ctxPayload,
-                    cfg,
-                    dispatcher,
-                    replyOptions: {
-                        ...dispatcherReplyOptions,
-                        disableBlockStreaming: !isNapCatStreamingModeEnabled(config),
-                    },
-                });
+                try {
+                    await runtime.channel.reply.dispatchReplyFromConfig({
+                        ctx: ctxPayload,
+                        cfg,
+                        dispatcher,
+                        replyOptions: {
+                            ...dispatcherReplyOptions,
+                            disableBlockStreaming: !isNapCatStreamingModeEnabled(config),
+                        },
+                    });
+                } catch (err) {
+                    console.error("[NapCat] Reply dispatch failed (acknowledged to avoid NapCat webhook retry):", err);
+                    res.statusCode = 200;
+                    res.setHeader("Content-Type", "application/json");
+                    res.end('{"status":"ok","message":"reply dispatch failed"}');
+                    return true;
+                }
             } finally {
                 typingController.stop();
                 markDispatchIdle?.();
