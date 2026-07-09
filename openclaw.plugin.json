@@ -49,6 +49,12 @@
             "description": "Stream replies as incremental QQ messages instead of waiting for the final combined response",
             "default": false
           },
+          "plainTextMode": {
+            "type": "boolean",
+            "title": "Plain Text Mode",
+            "description": "Convert outgoing Markdown-style text to QQ-friendly plain text",
+            "default": true
+          },
           "groupMentionOnly": {
             "type": "boolean",
             "title": "Require Mention in Group",

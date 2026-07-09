@@ -2,6 +2,7 @@
 import path from "node:path";
 import { access, copyFile, mkdir, unlink } from "node:fs/promises";
 import { buildNapCatMediaCq, isAudioMedia, resolveLocalFilePath } from "./media.js";
+import { formatNapCatOutgoingText } from "./plainText.js";
 import { setNapCatConfig } from "./runtime.js";
 
 async function sendToNapCat(url: string, payload: any, token?: string) {
@@ -181,6 +182,12 @@ export const napcatPlugin = {
                 description: "Stream replies as incremental QQ messages instead of waiting for the final combined response",
                 default: false
             },
+            plainTextMode: {
+                type: "boolean",
+                title: "Plain Text Mode",
+                description: "Convert outgoing Markdown-style text to QQ-friendly plain text",
+                default: true
+            },
             groupMentionOnly: {
                 type: "boolean",
                 title: "Require Mention in Group",
@@ -313,11 +320,12 @@ export const napcatPlugin = {
             }
 
             const endpoint = targetType === "group" ? "/send_group_msg" : "/send_private_msg";
-            const payload: any = { message: text };
+            const message = formatNapCatOutgoingText(text, config);
+            const payload: any = { message };
             if (targetType === "group") payload.group_id = targetId;
             else payload.user_id = targetId;
 
-            console.log(`[NapCat] Sending to ${targetType} ${targetId}: ${text}`);
+            console.log(`[NapCat] Sending to ${targetType} ${targetId}: ${message}`);
             
             try {
                 const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload, token);
@@ -389,10 +397,11 @@ export const napcatPlugin = {
                     })}`);
                     const uploadResult = await uploadGroupFileToNapCat(`${baseUrl}/upload_group_file`, uploadPayload, token);
 
-                    if (text && text.trim()) {
+                    const plainText = formatNapCatOutgoingText(text || "", config);
+                    if (plainText && plainText.trim()) {
                         await sendToNapCat(`${baseUrl}${endpoint}`, {
                             group_id: targetId,
-                            message: text,
+                            message: plainText,
                         }, token);
                     }
 
@@ -422,8 +431,9 @@ export const napcatPlugin = {
             const mediaMessage = mediaUrl
                 ? await buildNapCatMediaCq(mediaUrl, config)
                 : "";
-            const message = text
-                ? (mediaMessage ? `${text}\n${mediaMessage}` : text)
+            const plainText = formatNapCatOutgoingText(text || "", config);
+            const message = plainText
+                ? (mediaMessage ? `${plainText}\n${mediaMessage}` : plainText)
                 : (mediaMessage || "");
 
             const payload: any = { message };

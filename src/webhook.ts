@@ -5,6 +5,7 @@ import { createReadStream } from "node:fs";
 import { appendFile, mkdir, stat } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import { buildNapCatMediaCq } from "./media.js";
+import { formatNapCatOutgoingText } from "./plainText.js";
 import { getNapCatRuntime, getNapCatConfig } from "./runtime.js";
 
 // Group name cache removed
@@ -200,7 +201,7 @@ async function buildNapCatMessageFromReply(
     payload: { text?: string; mediaUrl?: string; mediaUrls?: string[]; audioAsVoice?: boolean },
     config: any
 ) {
-    const text = payload.text?.trim() || "";
+    const text = formatNapCatOutgoingText(payload.text?.trim() || "", config);
     const mediaCandidates = [
         ...(payload.mediaUrls || []),
         ...(payload.mediaUrl ? [payload.mediaUrl] : [])
