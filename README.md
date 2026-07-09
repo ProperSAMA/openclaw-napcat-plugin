@@ -553,6 +553,36 @@ test.wav
 
 ---
 
+## QQ 消息会自动转成纯文本吗？
+
+默认会。
+
+`plainTextMode` 默认是 `true`。通过 NapCat 发出的文字会尽量从 Markdown 风格转成 QQ 更适合显示的纯文本，比如去掉标题、加粗、代码块、表格分隔线，并把 Markdown 链接改成普通文本加链接。
+
+```json
+{
+  "channels": {
+    "napcat": {
+      "plainTextMode": true
+    }
+  }
+}
+```
+
+如果你确实想保留 Markdown 原文，可以显式关闭：
+
+```json
+{
+  "channels": {
+    "napcat": {
+      "plainTextMode": false
+    }
+  }
+}
+```
+
+---
+
 ## 日志功能有什么用？
 
 插件支持把收到的消息写入日志，方便你排查问题。
@@ -632,6 +662,7 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
       "enableGroupMessages": true,
       "groupWhitelist": ["123456789", "987654321"],
       "groupMentionOnly": true,
+      "plainTextMode": true,
       "mediaProxyEnabled": true,
       "publicBaseUrl": "http://127.0.0.1:18789",
       "mediaProxyToken": "change-me",
@@ -669,6 +700,7 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
 | `enableGroupMessages` | boolean | 是否处理群消息 | `false` |
 | `groupWhitelist` | string[] | 只允许这些群号触发机器人；空数组表示不过滤群 | `[]` |
 | `streaming_mode` | boolean | 是否启用流式传输模式；开启后会按处理步骤连续发送 QQ 消息 | `false` |
+| `plainTextMode` | boolean | 是否把发往 QQ 的 Markdown 风格文字转成纯文本 | `true` |
 | `enablePrivateTypingStatus` | boolean | 是否在私聊处理中调用 NapCat 的输入状态接口，显示 QQ “正在输入” | `true` |
 | `groupMentionOnly` | boolean | 群里是否必须 @ 机器人才处理 | `true` |
 | `mediaProxyEnabled` | boolean | 是否开启媒体代理，解决跨机器图片/语音发送问题 | `false` |
