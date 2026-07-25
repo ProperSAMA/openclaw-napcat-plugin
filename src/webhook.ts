@@ -151,9 +151,24 @@ async function postJsonWithNodeHttp(
     });
 }
 
-// Send message via NapCat API (node http/https keep-alive + retry for transient socket errors)
-async function sendToNapCat(url: string, payload: any, token?: string) {
-    const maxAttempts = 3;
+type SendToNapCatOptions = {
+    /**
+     * Retries are safe for reads and idempotent actions, but must be disabled
+     * for message sends: NapCat may have accepted the message even when the
+     * HTTP response is lost, and retrying would send the same message again.
+     */
+    allowRetry?: boolean;
+};
+
+// Call the NapCat API using node http/https. Transient retries are opt-out so
+// existing read/idempotent callers retain their previous behavior.
+export async function sendToNapCat(
+    url: string,
+    payload: any,
+    token?: string,
+    options: SendToNapCatOptions = {}
+) {
+    const maxAttempts = options.allowRetry === false ? 1 : 3;
     const timeoutsMs = [5000, 7000, 9000];
     const cfg = getNapCatConfig();
     const connectionClose = cfg.connectionClose !== false; // default true for local docker stability
@@ -908,7 +923,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         
                         console.log(`[NapCat] Sending reply to ${isGroup ? 'group' : 'private'} ${targetId}: ${message.substring(0, 50)}...`);
                         try {
-                            await sendToNapCat(`${baseUrl}${endpoint}`, msgPayload, token);
+                            await sendToNapCat(`${baseUrl}${endpoint}`, msgPayload, token, { allowRetry: false });
                             console.log("[NapCat] Reply sent successfully");
                         } catch (err) {
                             console.error("[NapCat] Reply delivery failed (suppressed to avoid channel crash):", err);
@@ -954,7 +969,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         
                         console.log(`[NapCat] Sending reply to ${isGroup ? 'group' : 'private'} ${targetId}: ${message.substring(0, 50)}...`);
                         try {
-                            await sendToNapCat(`${baseUrl}${endpoint}`, msgPayload, token);
+                            await sendToNapCat(`${baseUrl}${endpoint}`, msgPayload, token, { allowRetry: false });
                             console.log("[NapCat] Reply sent successfully");
                         } catch (err) {
                             console.error("[NapCat] Reply delivery failed (suppressed to avoid channel crash):", err);
