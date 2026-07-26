@@ -6,7 +6,12 @@ import { appendFile, mkdir, stat } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import { buildNapCatMediaCq } from "./media.js";
 import { formatNapCatOutgoingText } from "./plainText.js";
-import { getNapCatRuntime, getNapCatConfig } from "./runtime.js";
+import {
+    beginNapCatGroupReplyContext,
+    endNapCatGroupReplyContext,
+    getNapCatRuntime,
+    getNapCatConfig,
+} from "./runtime.js";
 
 // Group name cache removed
 
@@ -1010,6 +1015,13 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
 
             console.log("[NapCat] Dispatcher created, methods:", Object.keys(dispatcher));
 
+            // Codex source-channel replies use the message tool, which bypasses
+            // the dispatcher deliver callback. Keep the triggering group sender
+            // available to the outbound adapter while this reply is running.
+            const groupReplyContextToken = isGroup
+                ? beginNapCatGroupReplyContext(groupId, senderId)
+                : null;
+
             // Dispatch the message to OpenClaw
             try {
                 await typingController.start();
@@ -1033,6 +1045,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             } finally {
                 typingController.stop();
                 markDispatchIdle?.();
+                endNapCatGroupReplyContext(groupId, groupReplyContextToken);
             }
             
             res.statusCode = 200;

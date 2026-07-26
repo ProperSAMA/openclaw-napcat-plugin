@@ -3,7 +3,14 @@ import path from "node:path";
 import { access, copyFile, mkdir, unlink } from "node:fs/promises";
 import { buildNapCatMediaCq, isAudioMedia, resolveLocalFilePath } from "./media.js";
 import { formatNapCatOutgoingText } from "./plainText.js";
-import { setNapCatConfig } from "./runtime.js";
+import { getNapCatGroupReplyMentionUser, setNapCatConfig } from "./runtime.js";
+
+const recentTextDeliveries = new Map<string, {
+    expiresAt: number;
+    promise: Promise<any>;
+}>();
+const RECENT_TEXT_DELIVERY_TTL_MS = 15_000;
+let fallbackMessageIdSequence = 0;
 
 async function sendToNapCat(url: string, payload: any, token?: string) {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -26,6 +33,72 @@ async function sendToNapCat(url: string, payload: any, token?: string) {
         throw new Error(`NapCat API Error: ${res.status} ${res.statusText}${body ? ` | body=${body}` : ""}`);
     }
     return await res.json();
+}
+
+function withActiveGroupMention(message: string, targetType: string, targetId: string): string {
+    if (targetType !== "group" || !message) return message;
+    const mentionUserId = getNapCatGroupReplyMentionUser(targetId);
+    if (!mentionUserId) return message;
+    const mention = `[CQ:at,qq=${mentionUserId}]`;
+    if (message.includes(mention)) return message;
+    return `${mention} ${message}`;
+}
+
+function resolveNapCatMessageId(result: any): string {
+    const candidates = [
+        result?.data?.message_id,
+        result?.data?.messageId,
+        result?.message_id,
+        result?.messageId,
+        result?.data?.file_id,
+        result?.data?.fileId,
+        result?.echo,
+    ];
+    for (const candidate of candidates) {
+        if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
+            return String(candidate);
+        }
+    }
+    fallbackMessageIdSequence += 1;
+    return `napcat-ack-${Date.now()}-${fallbackMessageIdSequence}`;
+}
+
+function toOutboundDeliveryResult(result: any, targetId: string) {
+    return {
+        channel: "napcat",
+        messageId: resolveNapCatMessageId(result),
+        chatId: targetId,
+    };
+}
+
+async function sendTextToNapCatOnce(
+    url: string,
+    payload: any,
+    token: string,
+    deliveryKey: string,
+) {
+    const now = Date.now();
+    for (const [key, entry] of recentTextDeliveries) {
+        if (entry.expiresAt <= now) recentTextDeliveries.delete(key);
+    }
+
+    const existing = recentTextDeliveries.get(deliveryKey);
+    if (existing && existing.expiresAt > now) {
+        console.warn(`[NapCat] Suppressed duplicate outbound delivery: ${deliveryKey.split("\u0000").slice(0, 2).join(" ")}`);
+        return existing.promise;
+    }
+
+    const promise = sendToNapCat(url, payload, token);
+    recentTextDeliveries.set(deliveryKey, {
+        expiresAt: now + RECENT_TEXT_DELIVERY_TTL_MS,
+        promise,
+    });
+    try {
+        return await promise;
+    } catch (err) {
+        recentTextDeliveries.delete(deliveryKey);
+        throw err;
+    }
 }
 
 async function uploadGroupFileToNapCat(url: string, payload: {
@@ -320,19 +393,25 @@ export const napcatPlugin = {
             }
 
             const endpoint = targetType === "group" ? "/send_group_msg" : "/send_private_msg";
-            const message = formatNapCatOutgoingText(text, config);
+            const message = withActiveGroupMention(
+                formatNapCatOutgoingText(text, config),
+                targetType,
+                targetId,
+            );
             const payload: any = { message };
             if (targetType === "group") payload.group_id = targetId;
             else payload.user_id = targetId;
 
             console.log(`[NapCat] Sending to ${targetType} ${targetId}: ${message}`);
             
-            try {
-                const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload, token);
-                return { ok: true, result };
-            } catch (err: any) {
-                return { ok: false, error: err.message };
-            }
+            const deliveryKey = `${endpoint}\u0000${targetId}\u0000${message}`;
+            const result = await sendTextToNapCatOnce(
+                `${baseUrl}${endpoint}`,
+                payload,
+                token,
+                deliveryKey,
+            );
+            return toOutboundDeliveryResult(result, targetId);
         },
         sendMedia: async ({ to, text, mediaUrl, cfg }: any) => {
             const config = cfg.channels?.napcat || {};
@@ -397,7 +476,11 @@ export const napcatPlugin = {
                     })}`);
                     const uploadResult = await uploadGroupFileToNapCat(`${baseUrl}/upload_group_file`, uploadPayload, token);
 
-                    const plainText = formatNapCatOutgoingText(text || "", config);
+                    const plainText = withActiveGroupMention(
+                        formatNapCatOutgoingText(text || "", config),
+                        targetType,
+                        targetId,
+                    );
                     if (plainText && plainText.trim()) {
                         await sendToNapCat(`${baseUrl}${endpoint}`, {
                             group_id: targetId,
@@ -406,9 +489,9 @@ export const napcatPlugin = {
                     }
 
                     console.log(`[NapCat] Uploaded group file to ${targetId}: ${localFilePath}`);
-                    return { ok: true, result: uploadResult };
+                    return toOutboundDeliveryResult(uploadResult, targetId);
                 } catch (err: any) {
-                    return { ok: false, error: err.message };
+                    throw err;
                 } finally {
                     if (stagedPath) {
                         try {
@@ -432,9 +515,10 @@ export const napcatPlugin = {
                 ? await buildNapCatMediaCq(mediaUrl, config)
                 : "";
             const plainText = formatNapCatOutgoingText(text || "", config);
-            const message = plainText
+            const messageWithoutMention = plainText
                 ? (mediaMessage ? `${plainText}\n${mediaMessage}` : plainText)
                 : (mediaMessage || "");
+            const message = withActiveGroupMention(messageWithoutMention, targetType, targetId);
 
             const payload: any = { message };
             if (targetType === "group") payload.group_id = targetId;
@@ -442,12 +526,14 @@ export const napcatPlugin = {
 
             console.log(`[NapCat] Sending media to ${targetType} ${targetId}: ${message}`);
 
-            try {
-                const result = await sendToNapCat(`${baseUrl}${endpoint}`, payload, token);
-                return { ok: true, result };
-            } catch (err: any) {
-                return { ok: false, error: err.message };
-            }
+            const deliveryKey = `${endpoint}\u0000${targetId}\u0000${message}`;
+            const result = await sendTextToNapCatOnce(
+                `${baseUrl}${endpoint}`,
+                payload,
+                token,
+                deliveryKey,
+            );
+            return toOutboundDeliveryResult(result, targetId);
         },
     },
     gateway: {
