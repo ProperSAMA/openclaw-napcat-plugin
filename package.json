@@ -1,8 +1,16 @@
 {
   "name": "@propersama/openclaw-napcat",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": false,
   "description": "QQ chat channel plugin for OpenClaw via NapCat (OneBot 11)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ProperSAMA/openclaw-napcat-plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ProperSAMA/openclaw-napcat-plugin/issues"
+  },
+  "homepage": "https://github.com/ProperSAMA/openclaw-napcat-plugin#readme",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
