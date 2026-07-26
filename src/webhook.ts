@@ -6,7 +6,12 @@ import { appendFile, mkdir, stat } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import { buildNapCatMediaCq } from "./media.js";
 import { formatNapCatOutgoingText } from "./plainText.js";
-import { getNapCatRuntime, getNapCatConfig } from "./runtime.js";
+import {
+    beginNapCatGroupReplyContext,
+    endNapCatGroupReplyContext,
+    getNapCatRuntime,
+    getNapCatConfig,
+} from "./runtime.js";
 
 // Group name cache removed
 
@@ -212,9 +217,10 @@ export async function sendToNapCat(
     throw lastErr;
 }
 
-async function buildNapCatMessageFromReply(
+export async function buildNapCatMessageFromReply(
     payload: { text?: string; mediaUrl?: string; mediaUrls?: string[]; audioAsVoice?: boolean },
-    config: any
+    config: any,
+    mentionUserId?: string
 ) {
     const text = formatNapCatOutgoingText(payload.text?.trim() || "", config);
     const mediaCandidates = [
@@ -228,9 +234,18 @@ async function buildNapCatMessageFromReply(
             .map((url) => buildNapCatMediaCq(url, config, payload.audioAsVoice === true))
     );
 
-    if (text && mediaSegments.length > 0) return `${text}\n${mediaSegments.join("\n")}`;
-    if (text) return text;
-    return mediaSegments.join("\n");
+    let message = "";
+    if (text && mediaSegments.length > 0) message = `${text}\n${mediaSegments.join("\n")}`;
+    else if (text) message = text;
+    else message = mediaSegments.join("\n");
+
+    if (!message) return "";
+
+    const normalizedMentionUserId = String(mentionUserId || "").trim();
+    if (/^\d+$/.test(normalizedMentionUserId)) {
+        return `[CQ:at,qq=${normalizedMentionUserId}] ${message}`;
+    }
+    return message;
 }
 
 function getContentTypeByPath(filePath: string): string {
@@ -912,7 +927,11 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         const isGroup = conversationId.startsWith("group:");
                         const targetId = isGroup ? conversationId.replace("group:", "") : conversationId.replace("private:", "");
                         const endpoint = isGroup ? "/send_group_msg" : "/send_private_msg";
-                        const message = await buildNapCatMessageFromReply(payload, config);
+                        const message = await buildNapCatMessageFromReply(
+                            payload,
+                            config,
+                            isGroup ? senderId : undefined
+                        );
                         if (!message) {
                             console.log("[NapCat] Skip empty reply payload");
                             return;
@@ -958,7 +977,11 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         const isGroup = conversationId.startsWith("group:");
                         const targetId = isGroup ? conversationId.replace("group:", "") : conversationId.replace("private:", "");
                         const endpoint = isGroup ? "/send_group_msg" : "/send_private_msg";
-                        const message = await buildNapCatMessageFromReply(payload, config);
+                        const message = await buildNapCatMessageFromReply(
+                            payload,
+                            config,
+                            isGroup ? senderId : undefined
+                        );
                         if (!message) {
                             console.log("[NapCat] Skip empty reply payload");
                             return;
@@ -992,6 +1015,13 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
 
             console.log("[NapCat] Dispatcher created, methods:", Object.keys(dispatcher));
 
+            // Codex source-channel replies use the message tool, which bypasses
+            // the dispatcher deliver callback. Keep the triggering group sender
+            // available to the outbound adapter while this reply is running.
+            const groupReplyContextToken = isGroup
+                ? beginNapCatGroupReplyContext(groupId, senderId)
+                : null;
+
             // Dispatch the message to OpenClaw
             try {
                 await typingController.start();
@@ -1015,6 +1045,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             } finally {
                 typingController.stop();
                 markDispatchIdle?.();
+                endNapCatGroupReplyContext(groupId, groupReplyContextToken);
             }
             
             res.statusCode = 200;
