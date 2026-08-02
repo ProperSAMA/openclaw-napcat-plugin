@@ -94,12 +94,19 @@ openclaw plugins enable napcat
 
 ---
 
-### 第 3 步：放入 Skill（可选但推荐）
+### 第 3 步：确认插件 Skill 自动加载
 
-项目里有一个 `skill/napcat-qq`。  
-把它放到 OpenClaw 的 skill 目录里，可以让 OpenClaw 更稳定地使用这个 QQ 通道。
+项目里有一个 `skill/napcat-qq`，用于指导 OpenClaw 正确使用这个 QQ 通道发送私聊、群聊和媒体消息。
 
-如果你已经有自己的技能目录管理方式，也可以按你的习惯来。
+插件已经在 `openclaw.plugin.json` 中声明：
+
+```json
+{
+  "skills": ["skill/napcat-qq"]
+}
+```
+
+因此只要 `napcat` 插件已安装并启用，OpenClaw 就会自动加载这个插件自带的 skill，不需要手动复制到技能目录。
 
 注意：
 
