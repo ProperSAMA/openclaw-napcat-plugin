@@ -5,6 +5,7 @@
   "description": "QQ chat channel plugin for OpenClaw via NapCat (OneBot 11)",
   "author": "ProperSAMA",
   "channels": ["napcat"],
+  "skills": ["skill/napcat-qq"],
   "channelConfigs": {
     "napcat": {
       "label": "NapCat QQ",
