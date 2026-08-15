@@ -992,6 +992,9 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                             console.log("[NapCat] Commentary payload throttled, skipped");
                             return;
                         }
+                        if (payload?.isCommentary === true && typeof payload.text === "string" && payload.text.trim()) {
+                            payload = { ...payload, text: `⏳ ${payload.text}` };
+                        }
                         typingController.stop();
                         console.log("[NapCat] Reply to deliver:", JSON.stringify(payload).substring(0, 100));
                         // Actually send the message via NapCat API
@@ -1045,6 +1048,9 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         if (payload?.isCommentary === true && !shouldDeliverCommentaryPayload(conversationId)) {
                             console.log("[NapCat] Commentary payload throttled, skipped");
                             return;
+                        }
+                        if (payload?.isCommentary === true && typeof payload.text === "string" && payload.text.trim()) {
+                            payload = { ...payload, text: `⏳ ${payload.text}` };
                         }
                         typingController.stop();
                         console.log("[NapCat] Reply to deliver:", JSON.stringify(payload).substring(0, 100));
