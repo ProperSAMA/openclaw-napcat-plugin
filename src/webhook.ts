@@ -4,8 +4,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
 import { appendFile, mkdir, stat } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
+import { resolveAckReaction } from "openclaw/plugin-sdk/channel-feedback";
 import { buildNapCatMediaCq } from "./media.js";
 import { formatNapCatOutgoingText } from "./plainText.js";
+import { resolveNapCatEmojiId, shouldSendNapCatAckReaction } from "./reactions.js";
 import {
     beginNapCatGroupReplyContext,
     endNapCatGroupReplyContext,
@@ -97,6 +99,13 @@ const napcatHttpsAgent = new HttpsAgent({
 function isRetryableNapCatError(err: any): boolean {
     const code = String(err?.cause?.code || err?.code || "");
     return ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "UND_ERR_SOCKET", "ECONNABORTED"].includes(code);
+}
+
+function isNapCatFailedResponse(result: any): boolean {
+    return result?.status === "failed" ||
+        Number(result?.retcode || 0) !== 0 ||
+        result?.data?.status === "failed" ||
+        Number(result?.data?.retcode || 0) !== 0;
 }
 
 async function postJsonWithNodeHttp(
@@ -195,11 +204,16 @@ export async function sendToNapCat(
             console.log(`[NapCat] sendToNapCat success attempt ${attempt}/${maxAttempts} ${targetInfo} in ${elapsedMs}ms (connection=${connectionClose ? "close" : "keep-alive"})`);
 
             if (!res.bodyText) return { status: "ok" };
+            let parsed: any;
             try {
-                return JSON.parse(res.bodyText);
+                parsed = JSON.parse(res.bodyText);
             } catch {
                 return { status: "ok", raw: res.bodyText };
             }
+            if (isNapCatFailedResponse(parsed)) {
+                throw new Error(`NapCat API returned failure: ${res.bodyText.slice(0, 300)}`);
+            }
+            return parsed;
         } catch (err: any) {
             lastErr = err;
             const retryable = isRetryableNapCatError(err);
@@ -851,6 +865,40 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             const routeAgentId = String(route.agentId || "").trim().toLowerCase();
             const effectiveAgentId = routeAgentId || configuredAgentId || "main";
             const sessionKey = `agent:${effectiveAgentId}:${baseSessionKey}`;
+            const ackReaction = resolveAckReaction(cfg, effectiveAgentId, {
+                channel: "napcat",
+                accountId: route.accountId,
+            });
+            const shouldSendAckReaction = Boolean(
+                ackReaction &&
+                shouldSendNapCatAckReaction({
+                    scope: cfg.messages?.ackReactionScope,
+                    isGroup,
+                    requireMention: isGroup && groupMentionOnly,
+                    wasMentioned,
+                })
+            );
+            let ackEmojiId: string | null = null;
+            if (shouldSendAckReaction) {
+                try {
+                    ackEmojiId = resolveNapCatEmojiId(ackReaction);
+                } catch (err) {
+                    console.warn(`[NapCat] Skipping unsupported ack reaction ${JSON.stringify(ackReaction)}:`, err);
+                }
+            }
+            const ackReactionPromise = ackEmojiId
+                ? sendToNapCat(`${config.url || "http://127.0.0.1:15150"}/set_msg_emoji_like`, {
+                    message_id: messageId,
+                    emoji_id: ackEmojiId,
+                    set: true,
+                }, String(config.token || "").trim(), { allowRetry: false }).then(
+                    () => true,
+                    (err) => {
+                        console.warn(`[NapCat] Failed to add ack reaction to message ${messageId}:`, err);
+                        return false;
+                    }
+                )
+                : null;
 
             // User requested to use session key as display name for consistency
             const sessionDisplayName = sessionKey;
@@ -1046,6 +1094,18 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                 typingController.stop();
                 markDispatchIdle?.();
                 endNapCatGroupReplyContext(groupId, groupReplyContextToken);
+                if (cfg.messages?.removeAckAfterReply && ackReactionPromise && ackEmojiId) {
+                    void ackReactionPromise.then((didAck) => {
+                        if (!didAck) return;
+                        return sendToNapCat(`${config.url || "http://127.0.0.1:15150"}/set_msg_emoji_like`, {
+                            message_id: messageId,
+                            emoji_id: ackEmojiId,
+                            set: false,
+                        }, String(config.token || "").trim(), { allowRetry: false }).catch((err) => {
+                            console.warn(`[NapCat] Failed to remove ack reaction from message ${messageId}:`, err);
+                        });
+                    });
+                }
             }
             
             res.statusCode = 200;
