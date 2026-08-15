@@ -30,6 +30,8 @@
 - 图片发送
 - 语音发送（WAV 等音频）
 - 群文件上传
+- QQ 消息表情回应（reaction）
+- 收到消息后自动添加确认表情（复用 OpenClaw `messages.ackReaction` 配置）
 - 白名单控制（只允许指定 QQ 号触发）
 - 入站消息日志记录
 - 私聊处理中显示“正在输入”
@@ -160,6 +162,29 @@ openclaw plugins enable napcat
 - 允许处理群消息
 - `groupWhitelist` 留空时不过滤群；填了之后只响应指定群
 - 但群里必须 **@ 机器人** 才会回复
+
+### 收到消息时添加表情回应
+
+NapCat 通道支持 OpenClaw 的统一确认表情配置。默认情况下，OpenClaw 会在机器人开始处理群聊 `@` 消息时添加 👀。如果希望显式配置，可以写成：
+
+```json
+{
+  "messages": {
+    "ackReaction": "👀",
+    "ackReactionScope": "group-mentions",
+    "removeAckAfterReply": false
+  }
+}
+```
+
+- `ackReaction` 可以填写单个 Unicode Emoji，也可以直接填写 QQ 数字表情 ID
+- `ackReactionScope` 支持 `group-mentions`、`group-all`、`direct`、`all`、`off`
+- `removeAckAfterReply: true` 会在回复流程结束后撤销确认表情
+- 如需关闭自动确认表情，将 `ackReactionScope` 设置为 `off`，或将 `ackReaction` 设置为空字符串
+- 被用户白名单、群白名单或群聊 `@` 规则过滤的消息不会添加确认表情
+- 只保证 NapCat 当前 QQ 表情回应接口支持的 Emoji 可用；不支持的 Emoji 会被跳过并记录警告
+
+NapCat 通道也支持 OpenClaw `message` 工具的 `react` 动作。未显式指定 `messageId` 时，会回应当前触发消息；`remove: true` 可撤销机器人自己的表情回应。
 
 ---
 

@@ -41,6 +41,15 @@ description: "为 openclaw 发送 QQ 消息（含图片/语音等媒体）时，
 
 10. 仅使用本插件的 API 完成发送，不要调用其他 QQ 发送途径。
 
+## QQ 消息表情回应
+
+- NapCat 通道支持 `message` 工具的 `react` 动作，可对 QQ 消息添加或撤销表情回应。
+- 回应当前触发消息时可以省略 `messageId`；回应其他消息时必须显式提供 `messageId`。
+- `emoji` 优先填写单个 Unicode Emoji；也可直接填写 QQ 数字表情 ID。
+- 只保证 QQ 表情回应面板支持的 Emoji 可用；不支持的 Emoji 不要反复重试。
+- 撤销机器人自己的回应时使用同一个 `emoji` 并传 `remove: true`。
+- 只在轻量确认、表达情绪且无需额外文字时使用，避免对同一条消息连续添加多个回应。
+
 # 入站上下文
 
 - 当消息来自 NapCat 入站通道时，当前上下文会提供机器人自己的 QQ 号字段：`SelfId`、`BotId`、`BotQQ`、`NapCatSelfId`。

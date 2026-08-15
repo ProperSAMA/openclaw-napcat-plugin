@@ -1,8 +1,15 @@
 // Minimal NapCat Channel Implementation
 import path from "node:path";
 import { access, copyFile, mkdir, unlink } from "node:fs/promises";
+import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-contract";
+import {
+    jsonResult,
+    readReactionParams,
+    resolveReactionMessageId,
+} from "openclaw/plugin-sdk/channel-actions";
 import { buildNapCatMediaCq, isAudioMedia, resolveLocalFilePath } from "./media.js";
 import { formatNapCatOutgoingText } from "./plainText.js";
+import { resolveNapCatEmojiId } from "./reactions.js";
 import { getNapCatGroupReplyMentionUser, setNapCatConfig } from "./runtime.js";
 
 const recentTextDeliveries = new Map<string, {
@@ -196,6 +203,58 @@ function looksLikeNapCatTargetId(raw: string, normalized?: string): boolean {
     );
 }
 
+export const napcatMessageActions: ChannelMessageActionAdapter = {
+    supportsAction: ({ action }) => action === "react",
+    describeMessageTool: () => ({
+        actions: ["react"],
+        capabilities: [],
+        schema: null,
+    }),
+    handleAction: async ({ action, params, cfg, toolContext }) => {
+        if (action !== "react") {
+            throw new Error(`NapCat message action is not supported: ${action}`);
+        }
+
+        const messageId = resolveReactionMessageId({ args: params, toolContext });
+        if (messageId === undefined || messageId === null || !String(messageId).trim()) {
+            throw new Error(
+                "messageId required. Provide messageId explicitly or react to the current inbound message."
+            );
+        }
+        const { emoji, remove } = readReactionParams(params, {
+            removeErrorMessage: "Emoji is required to remove a NapCat reaction.",
+        });
+        const emojiId = resolveNapCatEmojiId(emoji);
+        const config = cfg.channels?.napcat || {};
+        const baseUrl = config.url || "http://127.0.0.1:15150";
+        const token = String(config.token || "").trim();
+
+        const result = await sendToNapCat(`${baseUrl}/set_msg_emoji_like`, {
+            message_id: String(messageId),
+            emoji_id: emojiId,
+            set: !remove,
+        }, token);
+
+        if (result?.status === "failed" || Number(result?.retcode || 0) !== 0) {
+            return jsonResult({
+                ok: false,
+                reason: "reaction_failed",
+                emoji,
+                emojiId,
+                hint: "NapCat rejected this reaction. Check the messageId and use an emoji supported by QQ. Do not retry unchanged.",
+            });
+        }
+
+        return jsonResult({
+            ok: true,
+            messageId: String(messageId),
+            emoji,
+            emojiId,
+            removed: remove,
+        });
+    },
+};
+
 export const napcatPlugin = {
     id: "napcat",
     meta: {
@@ -207,6 +266,7 @@ export const napcatPlugin = {
         chatTypes: ["direct", "group"],
         text: true,
         media: true,
+        reactions: true,
         blockStreaming: true
     },
     streaming: {
@@ -219,6 +279,7 @@ export const napcatPlugin = {
             hint: "private:<QQ号> / group:<群号> / session:napcat:private:<QQ号> / session:napcat:group:<群号>"
         }
     },
+    actions: napcatMessageActions,
     configSchema: {
         type: "object",
         properties: {

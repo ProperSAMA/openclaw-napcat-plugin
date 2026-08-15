@@ -77,3 +77,27 @@ test("idempotent NapCat calls keep transient retries enabled", async () => {
     await close(server);
   }
 });
+
+test("NapCat failed responses are not treated as successful JSON responses", async () => {
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end('{"status":"failed","retcode":200,"message":"msg not found"}');
+    });
+  });
+  const baseUrl = await listen(server);
+
+  try {
+    await assert.rejects(
+      sendToNapCat(`${baseUrl}/set_msg_emoji_like`, {
+        message_id: "999999",
+        emoji_id: "128064",
+        set: true,
+      }, undefined, { allowRetry: false }),
+      /NapCat API returned failure/,
+    );
+  } finally {
+    await close(server);
+  }
+});
