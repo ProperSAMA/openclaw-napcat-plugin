@@ -316,6 +316,12 @@ export const napcatPlugin = {
                 description: "Stream replies as incremental QQ messages instead of waiting for the final combined response",
                 default: false
             },
+            enable_progress_messages: {
+                type: "boolean",
+                title: "Enable Progress Messages",
+                description: "把 assistant 工作过程中的中间进度消息也发送到 QQ（throttled to 1 per 3s per conversation）",
+                default: false
+            },
             plainTextMode: {
                 type: "boolean",
                 title: "Plain Text Mode",

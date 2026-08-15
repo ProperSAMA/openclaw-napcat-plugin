@@ -26,6 +26,28 @@ function isNapCatStreamingModeEnabled(config: any): boolean {
     return config?.streaming_mode === true;
 }
 
+function isNapCatProgressMessagesEnabled(config: any): boolean {
+    return config?.enable_progress_messages === true;
+}
+
+// Throttle assistant commentary (progress) messages so long multi-tool tasks
+// do not flood QQ. Final (non-commentary) payloads are never throttled.
+const COMMENTARY_MIN_INTERVAL_MS = 3000;
+const commentaryLastSentAt = new Map<string, number>();
+
+function shouldDeliverCommentaryPayload(conversationId: string): boolean {
+    const now = Date.now();
+    const last = commentaryLastSentAt.get(conversationId) || 0;
+    if (now - last < COMMENTARY_MIN_INTERVAL_MS) return false;
+    commentaryLastSentAt.set(conversationId, now);
+    if (commentaryLastSentAt.size > 100) {
+        for (const [key, ts] of commentaryLastSentAt) {
+            if (now - ts > 10 * 60 * 1000) commentaryLastSentAt.delete(key);
+        }
+    }
+    return true;
+}
+
 function isNapCatPrivateTypingEnabled(config: any): boolean {
     return config?.enablePrivateTypingStatus !== false;
 }
@@ -966,6 +988,10 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                     responsePrefixContextProvider: () => ({}),
                     humanDelay: 0,
                     deliver: async (payload) => {
+                        if (payload?.isCommentary === true && !shouldDeliverCommentaryPayload(conversationId)) {
+                            console.log("[NapCat] Commentary payload throttled, skipped");
+                            return;
+                        }
                         typingController.stop();
                         console.log("[NapCat] Reply to deliver:", JSON.stringify(payload).substring(0, 100));
                         // Actually send the message via NapCat API
@@ -1016,6 +1042,10 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                     responsePrefixContextProvider: () => ({}),
                     humanDelay: 0,
                     deliver: async (payload) => {
+                        if (payload?.isCommentary === true && !shouldDeliverCommentaryPayload(conversationId)) {
+                            console.log("[NapCat] Commentary payload throttled, skipped");
+                            return;
+                        }
                         typingController.stop();
                         console.log("[NapCat] Reply to deliver:", JSON.stringify(payload).substring(0, 100));
                         // Actually send the message via NapCat API
@@ -1081,6 +1111,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         replyOptions: {
                             ...dispatcherReplyOptions,
                             disableBlockStreaming: !isNapCatStreamingModeEnabled(config),
+                            commentaryPayloadsEnabled: isNapCatProgressMessagesEnabled(config),
                         },
                     });
                 } catch (err) {
