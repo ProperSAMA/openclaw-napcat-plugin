@@ -2,6 +2,7 @@
 import path from "node:path";
 import { access, copyFile, mkdir, unlink } from "node:fs/promises";
 import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-contract";
+import type { ChannelMessagingAdapter } from "openclaw/plugin-sdk/core";
 import {
     jsonResult,
     readReactionParams,
@@ -203,6 +204,44 @@ function looksLikeNapCatTargetId(raw: string, normalized?: string): boolean {
     );
 }
 
+function parseNapCatSessionTarget(raw: string): { chatType: "direct" | "group"; peerId: string } | null {
+    const trimmed = String(raw ?? "").trim();
+    if (!trimmed) return null;
+    const withoutProvider = trimmed.replace(/^napcat:/i, "");
+    const match = withoutProvider.match(/^(?:session:napcat:)?(private|group):(\d+)$/i);
+    if (!match) return null;
+    return {
+        chatType: match[1].toLowerCase() === "group" ? "group" : "direct",
+        peerId: match[2],
+    };
+}
+
+const inferNapCatTargetChatType: NonNullable<ChannelMessagingAdapter["inferTargetChatType"]> = ({ to }) => {
+    return parseNapCatSessionTarget(to)?.chatType;
+};
+
+const resolveNapCatOutboundSessionRoute: NonNullable<ChannelMessagingAdapter["resolveOutboundSessionRoute"]> = (params) => {
+    const parsed = parseNapCatSessionTarget(params.target);
+    if (!parsed) return null;
+    const agentId = String(params.agentId || "").trim().toLowerCase() || "main";
+    const conversationType = parsed.chatType === "group" ? "group" : "private";
+    // Must match the inbound canonical session key built in webhook.ts:
+    // `agent:${agentId}:session:napcat:(private|group):${id}`
+    const sessionKey = `agent:${agentId}:session:napcat:${conversationType}:${parsed.peerId}`;
+    const conversationId = `${conversationType}:${parsed.peerId}`;
+    return {
+        sessionKey,
+        // SDK semantics: session key minus any thread suffix (none for NapCat).
+        baseSessionKey: sessionKey,
+        peer: { kind: parsed.chatType, id: parsed.peerId },
+        chatType: parsed.chatType,
+        from: `napcat:${conversationId}`,
+        // Core uses route.to as the delivery target handed to outbound.sendText,
+        // which parses `private:<id>` / `group:<id>` (no `napcat:` prefix).
+        to: conversationId,
+    };
+};
+
 export const napcatMessageActions: ChannelMessageActionAdapter = {
     supportsAction: ({ action }) => action === "react",
     describeMessageTool: () => ({
@@ -255,6 +294,16 @@ export const napcatMessageActions: ChannelMessageActionAdapter = {
     },
 };
 
+const napcatMessaging: ChannelMessagingAdapter = {
+    normalizeTarget: normalizeNapCatTarget,
+    inferTargetChatType: inferNapCatTargetChatType,
+    resolveOutboundSessionRoute: resolveNapCatOutboundSessionRoute,
+    targetResolver: {
+        looksLikeId: looksLikeNapCatTargetId,
+        hint: "private:<QQ号> / group:<群号> / session:napcat:private:<QQ号> / session:napcat:group:<群号>"
+    }
+};
+
 export const napcatPlugin = {
     id: "napcat",
     meta: {
@@ -272,13 +321,7 @@ export const napcatPlugin = {
     streaming: {
         blockStreamingCoalesceDefaults: { minChars: 1500, idleMs: 1000 }
     },
-    messaging: {
-        normalizeTarget: normalizeNapCatTarget,
-        targetResolver: {
-            looksLikeId: looksLikeNapCatTargetId,
-            hint: "private:<QQ号> / group:<群号> / session:napcat:private:<QQ号> / session:napcat:group:<群号>"
-        }
-    },
+    messaging: napcatMessaging,
     actions: napcatMessageActions,
     configSchema: {
         type: "object",
@@ -314,6 +357,12 @@ export const napcatPlugin = {
                 type: "boolean",
                 title: "Streaming Mode",
                 description: "Stream replies as incremental QQ messages instead of waiting for the final combined response",
+                default: false
+            },
+            enable_progress_messages: {
+                type: "boolean",
+                title: "Enable Progress Messages",
+                description: "把 assistant 工作过程中的中间进度消息也发送到 QQ（throttled to 1 per 3s per conversation）",
                 default: false
             },
             plainTextMode: {
