@@ -782,6 +782,7 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
 | `groupFileStageContainerDir` | string | 上面暂存目录在容器里的对应路径 | `""` |
 | `enableInboundLogging` | boolean | 是否记录收到的消息日志 | `true` |
 | `inboundLogDir` | string | 入站日志目录 | `./logs/napcat-inbound` |
+| `enable_progress_messages` | boolean | 是否将 OpenClaw 的 commentary 进度消息投递到 QQ | `false` |
 
 ---
 
@@ -834,6 +835,36 @@ NapCat 入站事件会带上机器人自己的 QQ 号（`self_id`）。插件会
   }
 ]
 ```
+
+---
+
+### 进度消息（commentary）需要 verbose 模式
+
+`enable_progress_messages` 控制是否把 OpenClaw 的 commentary 进度消息（比如工具调用过程中的中间状态）投递到 QQ。
+
+**但有个重要前提**：OpenClaw 核心的 commentary 消息投递依赖 verbose 模式。如果 verbose 是关闭的（默认就是关闭），即使 `enable_progress_messages` 设为 `true`，进度消息也不会产生。
+
+所以你需要同时开启 verbose：
+
+**方法 1：单次会话开启（临时）**
+```
+/verbose on
+```
+
+**方法 2：全局默认开启（推荐）**
+在 `openclaw.json` 里设置：
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "verboseDefault": "on"
+    }
+  }
+}
+```
+
+这样所有会话默认都会投递 commentary 进度消息。
 
 ---
 
