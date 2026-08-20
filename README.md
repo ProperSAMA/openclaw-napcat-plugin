@@ -19,14 +19,11 @@
 
 ---
 
-## 这插件能做什么？
-
-目前支持：
+## 功能特性
 
 - 私聊消息收发
-- 群聊消息收发
+- 群聊消息收发（支持 @ 触发）
 - 读取合并转发消息（`CQ:forward`）
-- 按会话自动路由到 OpenClaw
 - 图片发送
 - 语音发送（WAV 等音频）
 - 群文件上传
@@ -34,99 +31,37 @@
 - 收到消息后自动添加确认表情（复用 OpenClaw `messages.ackReaction` 配置）
 - 白名单控制（只允许指定 QQ 号触发）
 - 入站消息日志记录
-- 私聊处理中显示“正在输入”
-
-适合的场景：
-
-- 想把 OpenClaw 接到自己的 QQ 上
-- 想让 OpenClaw 在 QQ 群里工作
-- 想做一个“QQ 上可直接对话”的私人工具助手
+- 私聊处理中显示"正在输入"
+- 进度消息（commentary）投递
 
 ---
 
-## 一句话理解安装流程
+## 快速开始
 
-你需要把三件事接起来：
-
-1. **NapCat 正常运行**
-2. **OpenClaw 安装这个插件**
-3. **NapCat 把消息转发给 OpenClaw**
-
-只要这三步通了，基本就能用。
-
----
-
-## 开始前，你需要准备什么
-
-在安装前，最好先确认你已经有：
+### 前置要求
 
 - 一个能正常运行的 **OpenClaw**
 - 一个能正常运行的 **NapCat**
 - 能编辑 `~/.openclaw/openclaw.json`
 - 能重启 OpenClaw Gateway
 
-如果你对 NapCat 还不熟，可以先把 NapCat 单独跑起来，确认它本身没问题，再来接 OpenClaw。
+### 安装步骤
 
----
-
-## 最简单上手方式（推荐先这样配）
-
-如果你只想尽快跑通，先按这个最小方案来。
-
-### 第 1 步：安装插件
-
-推荐直接按 **npm 包名** 安装：
+#### 1. 安装插件
 
 ```bash
 openclaw plugins install @propersama/openclaw-napcat
 ```
 
-如果你后面改成了自己的 npm scope，就把上面的包名替换成你实际发布的那个名字。
-
----
-
-### 第 2 步：确认插件已启用
-
-如果这是首次安装，通常 OpenClaw 会把它登记到插件列表里。  
-你也可以显式确认一下：
+#### 2. 启用插件
 
 ```bash
 openclaw plugins enable napcat
 ```
 
----
+#### 3. 配置 OpenClaw
 
-### 第 3 步：确认插件 Skill 自动加载
-
-项目里有一个 `skill/napcat-qq`，用于指导 OpenClaw 正确使用这个 QQ 通道发送私聊、群聊和媒体消息。
-
-插件已经在 `openclaw.plugin.json` 中声明：
-
-```json
-{
-  "skills": ["skill/napcat-qq"]
-}
-```
-
-因此只要 `napcat` 插件已安装并启用，OpenClaw 就会自动加载这个插件自带的 skill，不需要手动复制到技能目录。
-
-注意：
-
-- 通过 npm 安装插件时，`skill/napcat-qq` 会随包发布
-- 但其中的 `scripts/qq-contact-search.js` 默认**不会**随 npm 包一起安装
-- 如果你需要“按昵称 / 备注 / 群名搜索联系人”的能力，可以按下面“按昵称或备注找 QQ / 群”的说明，手动把这个脚本放回对应的 skill 目录
-
----
-
-### 第 4 步：修改 OpenClaw 配置
-
-打开：
-
-```bash
-~/.openclaw/openclaw.json
-```
-
-加入或修改下面这段：
+编辑 `~/.openclaw/openclaw.json`，加入：
 
 ```json
 {
@@ -151,29 +86,153 @@ openclaw plugins enable napcat
 }
 ```
 
-这是一个**最小可用配置**。
+#### 4. 重启 Gateway
 
-它的意思是：
+```bash
+openclaw gateway restart
+```
 
-- 启用 `napcat` 通道
-- NapCat 的 HTTP 服务地址是 `http://127.0.0.1:15150`
-- `streaming_mode` 为 `true` 时会改成流式回复，每处理一步就发一条 QQ 消息
-- `enablePrivateTypingStatus` 为 `true` 时，私聊里 OpenClaw 思考期间会尝试显示 QQ “正在输入”
-- 允许处理群消息
-- `groupWhitelist` 留空时不过滤群；填了之后只响应指定群
-- 但群里必须 **@ 机器人** 才会回复
+#### 5. 配置 NapCat
+
+在 NapCat 的网络配置界面，新增并启用：
+
+**A. Http 服务器**
+- Host: `0.0.0.0`
+- Port: `15150`
+
+**B. Http 客户端**
+- Url: `http://127.0.0.1:18789/napcat`
+- 消息格式: `String`
+
+如果 OpenClaw 和 NapCat 不在同一台机器上，把 `127.0.0.1` 改成 OpenClaw 的真实 IP。
+
+#### 6. 测试
+
+- **私聊**：直接给对应 QQ 发消息
+- **群聊**：在群里发 `@机器人 你好`
+
+---
+
+## 配置说明
+
+### 基础配置
+
+| 配置项 | 类型 | 说明 | 默认值 |
+|---|---|---|---|
+| `enabled` | boolean | 是否启用 napcat 通道 | `false` |
+| `url` | string | NapCat 的 HTTP 服务地址 | `http://127.0.0.1:15150` |
+| `agentId` | string | 固定把消息交给哪个 OpenClaw agent 处理；留空时按 OpenClaw 路由 | `""` |
+
+### 权限控制
+
+| 配置项 | 类型 | 说明 | 默认值 |
+|---|---|---|---|
+| `allowUsers` | string[] | 只允许这些 QQ 号触发机器人；空数组表示不过滤 | `[]` |
+| `enableGroupMessages` | boolean | 是否处理群消息 | `false` |
+| `groupWhitelist` | string[] | 只允许这些群号触发机器人；空数组表示不过滤群 | `[]` |
+| `groupMentionOnly` | boolean | 群里是否必须 @ 机器人才处理 | `true` |
+
+### 消息处理
+
+| 配置项 | 类型 | 说明 | 默认值 |
+|---|---|---|---|
+| `streaming_mode` | boolean | 是否启用流式传输模式；开启后会按处理步骤连续发送 QQ 消息 | `false` |
+| `plainTextMode` | boolean | 是否把发往 QQ 的 Markdown 风格文字转成纯文本 | `true` |
+| `enablePrivateTypingStatus` | boolean | 是否在私聊处理中显示 QQ "正在输入" | `true` |
+| `enable_progress_messages` | boolean | 是否将 OpenClaw 的 commentary 进度消息投递到 QQ | `false` |
+
+### 媒体代理（跨机器部署）
+
+| 配置项 | 类型 | 说明 | 默认值 |
+|---|---|---|---|
+| `mediaProxyEnabled` | boolean | 是否开启媒体代理，解决跨机器图片/语音发送问题 | `false` |
+| `publicBaseUrl` | string | OpenClaw 对 NapCat 可访问的地址 | `""` |
+| `mediaProxyToken` | string | 媒体代理的访问令牌（可选） | `""` |
+
+### 语音和文件
+
+| 配置项 | 类型 | 说明 | 默认值 |
+|---|---|---|---|
+| `voiceBasePath` | string | 相对语音文件名的基础目录 | `""` |
+| `groupFileFolder` | string | 群文件默认上传目录 | `""` |
+| `groupFileHostPrefix` | string | 宿主机上已挂载进容器的目录前缀 | `""` |
+| `groupFileContainerPrefix` | string | 上面那个目录在容器里的对应路径 | `""` |
+| `groupFileStageHostDir` | string | 宿主机上的上传暂存目录 | `""` |
+| `groupFileStageContainerDir` | string | 上面暂存目录在容器里的对应路径 | `""` |
+
+### 日志
+
+| 配置项 | 类型 | 说明 | 默认值 |
+|---|---|---|---|
+| `enableInboundLogging` | boolean | 是否记录收到的消息日志 | `true` |
+| `inboundLogDir` | string | 入站日志目录 | `./logs/napcat-inbound` |
+
+---
+
+## 使用指南
+
+### 发消息目标格式
+
+#### 私聊
+
+- `private:<QQ号>`
+- `session:napcat:private:<QQ号>`
+
+例如：`private:123456789`
+
+#### 群聊
+
+- `group:<群号>`
+- `session:napcat:group:<群号>`
+
+例如：`group:123456789`
+
+**注意**：只写纯数字会被当成私聊 QQ 号，发群消息一定要加 `group:` 前缀。
+
+---
+
+### 群聊工作模式
+
+#### 模式 1：完全不处理群消息
+
+```json
+{
+  "enableGroupMessages": false
+}
+```
+
+适合：只想做私聊助手。
+
+#### 模式 2：处理群消息，但必须 @ 机器人（推荐）
+
+```json
+{
+  "enableGroupMessages": true,
+  "groupWhitelist": ["123456789"],
+  "groupMentionOnly": true
+}
+```
+
+适合：大多数群聊场景。
+
+#### 模式 3：处理所有群消息（不推荐）
+
+```json
+{
+  "enableGroupMessages": true,
+  "groupMentionOnly": false
+}
+```
+
+适合：你非常确定需要"全群监听"。
+
+---
 
 ### 自动确认表情（👀）
 
-NapCat 通道支持 OpenClaw 的统一确认表情功能。机器人收到符合处理条件的消息后，可以立即添加一个 QQ 表情回应，让用户知道消息已经进入处理流程。
+机器人收到符合处理条件的消息后，可以立即添加一个 QQ 表情回应。
 
-默认行为是：
-
-- 使用 👀 作为确认表情
-- 仅在群聊中被 `@` 时添加
-- 回复完成后保留表情
-
-这些选项位于 OpenClaw 配置文件顶层的 `messages` 字段中，与 `channels.napcat` 同级：
+配置位于 `openclaw.json` 顶层的 `messages` 字段：
 
 ```json
 {
@@ -185,243 +244,54 @@ NapCat 通道支持 OpenClaw 的统一确认表情功能。机器人收到符合
 }
 ```
 
-- `ackReaction` 可以填写单个 Unicode Emoji，也可以直接填写 QQ 数字表情 ID
-- `ackReactionScope` 控制在哪些消息上添加表情：
-  - `group-mentions`：仅群聊中被 `@` 的消息（默认）
+- `ackReaction`：Unicode Emoji 或 QQ 数字表情 ID
+- `ackReactionScope`：
+  - `group-mentions`：仅群聊中被 @ 的消息（默认）
   - `group-all`：所有会被机器人处理的群消息
   - `direct`：仅私聊消息
   - `all`：群聊和私聊消息
   - `off`：完全关闭
-- `removeAckAfterReply` 为 `true` 时，会在回复流程结束后撤销确认表情；默认为 `false`
-- 被用户白名单、群白名单或群聊 `@` 规则过滤的消息不会添加确认表情
-- 只保证 NapCat 当前 QQ 表情回应接口支持的 Emoji 可用；不支持的 Emoji 会被跳过并记录警告
+- `removeAckAfterReply`：回复完成后是否撤销表情，默认 `false`
 
-如需关闭该功能：
+---
+
+### 进度消息（commentary）
+
+`enable_progress_messages` 控制是否把 OpenClaw 的 commentary 进度消息（比如工具调用过程中的中间状态）投递到 QQ。
+
+**重要前提**：OpenClaw 核心的 commentary 消息投递依赖 verbose 模式。如果 verbose 是关闭的（默认就是关闭），即使 `enable_progress_messages` 设为 `true`，进度消息也不会产生。
+
+所以你需要同时开启 verbose：
+
+**方法 1：单次会话开启（临时）**
+```
+/verbose on
+```
+
+**方法 2：全局默认开启（推荐）**
+
+在 `openclaw.json` 里设置：
 
 ```json
 {
-  "messages": {
-    "ackReactionScope": "off"
-  }
-}
-```
-
-也可以将 `ackReaction` 设置为空字符串来禁用确认表情。
-
-例如，改为收到消息时添加 👍，并在回复结束后自动撤销：
-
-```json
-{
-  "messages": {
-    "ackReaction": "👍",
-    "ackReactionScope": "group-mentions",
-    "removeAckAfterReply": true
-  }
-}
-```
-
-NapCat 通道也支持 OpenClaw `message` 工具的 `react` 动作。未显式指定 `messageId` 时，会回应当前触发消息；`remove: true` 可撤销机器人自己的表情回应。
-
----
-
-### 第 5 步：重启 OpenClaw Gateway
-
-```bash
-openclaw gateway restart
-```
-
----
-
-### 第 6 步：在 NapCat 里添加网络配置
-
-去 NapCat 的网络配置界面，新增并启用下面两项：
-
-#### A. Http 服务器
-
-- Host: `0.0.0.0`
-- Port: `15150`
-
-#### B. Http 客户端
-
-- Url: `http://127.0.0.1:18789/napcat`
-- 消息格式: `String`
-
-如果 **OpenClaw 和 NapCat 不在同一台机器上**，这里不要写 `127.0.0.1`，要改成 OpenClaw 那台机器的真实 IP。
-
-例如：
-
-```text
-http://192.168.1.10:18789/napcat
-```
-
----
-
-### 第 7 步：测试
-
-现在你可以测试：
-
-#### 私聊测试
-直接给对应 QQ 发消息。
-
-#### 群聊测试
-在群里发：
-
-```text
-@机器人 你好
-```
-
-如果配置正确，OpenClaw 就会开始处理消息。
-
----
-
-## 如果你只想让特定 QQ 号能用
-
-你可以加白名单：
-
-```json
-{
-  "channels": {
-    "napcat": {
-      "enabled": true,
-      "url": "http://127.0.0.1:15150",
-      "allowUsers": ["123456789", "987654321"],
-      "enableGroupMessages": true,
-      "groupMentionOnly": true
+  "agents": {
+    "defaults": {
+      "verboseDefault": "on"
     }
   }
 }
 ```
 
-这表示：
-
-- 只有 `123456789` 和 `987654321` 这两个 QQ 号发来的消息会触发机器人
-- 其他人发消息时，插件会直接忽略
-
-如果你比较在意权限控制，建议开启。
-
 ---
 
-## 如果你只想让特定群能用
+### 图片和语音发送
 
-你可以配置群白名单：
+#### 图片
 
-```json
-{
-  "channels": {
-    "napcat": {
-      "enabled": true,
-      "url": "http://127.0.0.1:15150",
-      "enableGroupMessages": true,
-      "groupWhitelist": ["123456789", "987654321"],
-      "groupMentionOnly": true
-    }
-  }
-}
-```
-
-这表示：
-
-- `groupWhitelist` 为空时，不按群号过滤
-- `groupWhitelist` 不为空时，只处理白名单里的群消息
-- 它和 `allowUsers`、`enableGroupMessages`、`groupMentionOnly` 可以同时使用
-
----
-
-## 群聊怎么工作？
-
-群消息有 3 种常见模式：
-
-### 模式 1：完全不处理群消息
-
-```json
-{
-  "enableGroupMessages": false
-}
-```
-
-适合：只想做私聊助手。
-
----
-
-### 模式 2：处理群消息，但必须 @ 机器人（推荐）
-
-```json
-{
-  "enableGroupMessages": true,
-  "groupWhitelist": ["123456789", "987654321"],
-  "groupMentionOnly": true
-}
-```
-
-适合：大多数群聊场景。  
-这样不会因为群里有人聊天就一直触发机器人。  
-如果再配上 `groupWhitelist`，就可以进一步限制只在指定群里生效。
-
----
-
-### 模式 3：处理所有群消息（一般不推荐）
-
-```json
-{
-  "enableGroupMessages": true,
-  "groupWhitelist": ["123456789"],
-  "groupMentionOnly": false
-}
-```
-
-适合：你非常确定自己需要“全群监听”。  
-否则容易太吵，也更容易误触发。  
-如果只想监听少数几个群，建议同时配置 `groupWhitelist`。
-
----
-
-## 发消息时，目标怎么写？
-
-如果你要让 OpenClaw 主动往 QQ 发消息，最好明确写目标格式。
-
-### 私聊目标
-
-可以写：
-
-- `private:<QQ号>`
-- `session:napcat:private:<QQ号>`
-
-例如：
-
-- `private:123456789`
-- `session:napcat:private:123456789`
-
-### 群聊目标
-
-可以写：
-
-- `group:<群号>`
-- `session:napcat:group:<群号>`
-
-例如：
-
-- `group:123456789`
-- `session:napcat:group:123456789`
-
-### 一个容易踩坑的点
-
-如果你只写纯数字，比如：
-
-```text
-123456789
-```
-
-插件会默认把它当成 **私聊 QQ 号**。  
-所以如果你要发到群，**一定要加 `group:` 前缀**。
-
----
-
-## 图片和语音怎么发？
-
-### 图片
 插件支持把图片当作 QQ 图片消息发送。
 
-### 语音
+#### 语音
+
 如果媒体链接是这些后缀之一，会自动按语音消息发送：
 
 - `.wav`
@@ -433,55 +303,15 @@ http://192.168.1.10:18789/napcat
 - `.flac`
 - `.aac`
 
----
+#### `voiceBasePath` 的作用
 
-### `voiceBasePath` 是干什么的？
-
-如果你传的是相对文件名，比如：
-
-```text
-test.wav
-```
-
-插件会去拼接：
-
-```text
-<voiceBasePath>/test.wav
-```
-
-例如：
-
-```json
-{
-  "channels": {
-    "napcat": {
-      "voiceBasePath": "/tmp/napcat-voice"
-    }
-  }
-}
-```
-
-那么 `test.wav` 会被解释成：
-
-```text
-/tmp/napcat-voice/test.wav
-```
-
-如果你经常发本地语音，这个配置会很方便。
+如果你传的是相对文件名（如 `test.wav`），插件会拼接成 `<voiceBasePath>/test.wav`。
 
 ---
 
-## OpenClaw 和 NapCat 不在同一台机器上怎么办？
+### 跨机器部署（媒体代理）
 
-这种情况最常见的问题是：
-
-**文字能发，图片发不出去。**
-
-因为文字可以直接通过接口发送，但图片/语音常常需要 NapCat 去“拿文件”或“拉链接”。
-
-这时建议开启 **媒体代理**。
-
-### 推荐配置
+如果 OpenClaw 和 NapCat 不在同一台机器上，文字能发但图片发不出去，需要开启媒体代理：
 
 ```json
 {
@@ -496,71 +326,21 @@ test.wav
 }
 ```
 
-意思是：
-
-- NapCat 在 `192.168.1.20:15150`
-- OpenClaw 对 NapCat 可访问的地址是 `192.168.1.10:18789`
-- 插件会把媒体地址改写成 `http://192.168.1.10:18789/napcat/media?...`
-- NapCat 再去这个地址拿图片/语音
-
-### 你要注意
-
-- `publicBaseUrl` 必须是 **NapCat 那台机器真的能访问到的地址**
-- 如果设置了 `mediaProxyToken`，两边的请求必须带上正确 token
+- `publicBaseUrl` 必须是 NapCat 能访问到的地址
+- 如果设置了 `mediaProxyToken`，两边请求必须带上正确 token
 - 防火墙 / Docker 端口映射 / 局域网访问都要打通
 
-如果你是跨机器部署，建议优先看这里。
-
 ---
 
-## 群文件上传怎么用？
+### 群文件上传
 
-这个插件不只是能发图片，还支持把本地文件上传到 QQ 群文件。
+当目标是群且传的是本地文件路径时，插件会自动按"群文件上传"处理。
 
-比如：
+#### Docker 部署注意事项
 
-- PDF
-- 压缩包
-- 文档
-- 其他本地文件
+如果 NapCat 在 Docker 容器里，需要提供"宿主机目录 ↔ 容器目录"的映射。
 
-### 基本用法
-
-当满足下面两个条件时，插件会自动按“群文件上传”处理：
-
-1. 目标是群：`group:<群号>`
-2. 你传的是**本地文件路径**
-
-例如：
-
-```json
-{
-  "action": "send",
-  "channel": "napcat",
-  "target": "group:123456789",
-  "message": "这是本次日报文件",
-  "filePath": "/tmp/daily-report.pdf"
-}
-```
-
----
-
-### Docker 部署时要特别注意
-
-如果 NapCat 在 Docker 容器里，而文件在宿主机上，NapCat 默认是**看不到宿主机文件路径**的。
-
-所以你需要提供一个“宿主机目录 ↔ 容器目录”的映射。
-
-常见做法有两种：
-
-### 方案 A：直接使用已挂载路径
-
-如果某个宿主机目录本来就已经挂载进 NapCat 容器，可以配置：
-
-- `groupFileHostPrefix`
-- `groupFileContainerPrefix`
-
-例如：
+**方案 A：使用已挂载路径**
 
 ```json
 {
@@ -573,15 +353,7 @@ test.wav
 }
 ```
 
-这样插件会把宿主机路径自动换算成容器内路径。
-
----
-
-### 方案 B：使用暂存目录（更通用）
-
-如果原文件不在挂载目录里，可以让插件先复制到一个“上传暂存目录”，再让 NapCat 从容器内对应目录读取。
-
-配置示例：
+**方案 B：使用暂存目录（更通用）**
 
 ```json
 {
@@ -594,104 +366,19 @@ test.wav
 }
 ```
 
-插件会：
-
-1. 把文件复制到宿主机暂存目录
-2. 告诉 NapCat 去读取容器内对应路径
-3. 上传完成后自动清理暂存文件
-
-这个方案对 Docker 用户通常最省心。
+插件会把文件复制到暂存目录，告诉 NapCat 读取容器内路径，上传完成后自动清理。
 
 ---
 
-### 额外可选项：群文件默认目录
+### 按昵称或备注找 QQ / 群
 
-```json
-{
-  "channels": {
-    "napcat": {
-      "groupFileFolder": ""
-    }
-  }
-}
-```
+插件提供了一个联系人搜索脚本，适合配合 `skill/napcat-qq` 一起用。
 
-它对应 NapCat 的 `folder` 参数。  
-如果你希望上传进群文件的某个固定目录，可以在这里设置。
-
----
-
-## QQ 消息会自动转成纯文本吗？
-
-默认会。
-
-`plainTextMode` 默认是 `true`。通过 NapCat 发出的文字会尽量从 Markdown 风格转成 QQ 更适合显示的纯文本，比如去掉标题、加粗、代码块、表格分隔线，并把 Markdown 链接改成普通文本加链接。
-
-```json
-{
-  "channels": {
-    "napcat": {
-      "plainTextMode": true
-    }
-  }
-}
-```
-
-如果你确实想保留 Markdown 原文，可以显式关闭：
-
-```json
-{
-  "channels": {
-    "napcat": {
-      "plainTextMode": false
-    }
-  }
-}
-```
-
----
-
-## 日志功能有什么用？
-
-插件支持把收到的消息写入日志，方便你排查问题。
-
-默认是开启的：
-
-```json
-{
-  "enableInboundLogging": true,
-  "inboundLogDir": "./logs/napcat-inbound"
-}
-```
-
-日志会按用户或群分别记录。  
-这对下面这些情况特别有帮助：
-
-- 机器人为什么没回复？
-- 是不是消息根本没进来？
-- NapCat 发过来的原始内容到底长什么样？
-
-如果你在排查群消息、@ 识别、白名单、解析失败之类的问题，这个日志非常有价值。
-
----
-
-## 按昵称或备注找 QQ / 群
-
-issue #3 对应的改动已经包含在仓库里：现在提供了一个简单的联系人搜索脚本，适合配合 `skill/napcat-qq` 一起用。
-
-为了避免 OpenClaw 的安装安全扫描误判，这个脚本默认**不会包含在 npm 发布包里**。  
-如果你是通过 `openclaw plugins install @propersama/openclaw-napcat` 安装的插件，并且想启用联系人搜索，请手动从仓库复制这个文件到本地 skill 目录。
-
-脚本路径：
+**注意**：这个脚本默认**不会**随 npm 包一起安装，需要手动复制：
 
 ```bash
-skill/napcat-qq/scripts/qq-contact-search.js
-```
-
-你可以从仓库拿到这个文件后，放到本地的同名路径，例如：
-
-```bash
-~/.openclaw/skills/napcat-qq/scripts/qq-contact-search.js
+# 从仓库复制到本地 skill 目录
+cp skill/napcat-qq/scripts/qq-contact-search.js ~/.openclaw/skills/napcat-qq/scripts/
 ```
 
 用法：
@@ -702,22 +389,32 @@ node skill/napcat-qq/scripts/qq-contact-search.js 测试群 group
 node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
 ```
 
-说明：
+---
 
-- 第一个参数是关键词
-- 第二个参数可选：`private` / `group` / `all`
-- 默认会去 NapCat 的 `get_friend_list` / `get_group_list` 做简单模糊匹配
-- 可通过环境变量覆盖连接信息：
-  - `NAPCAT_URL`
-  - `NAPCAT_TOKEN`
+### 按群路由到不同 agent
 
-返回结果是 JSON，里面的 `candidates` 会列出匹配到的联系人或群，供 skill 再决定是直接发送、让用户选号，还是继续追问。
+在 `openclaw.json` 里用 `bindings` 为特定群指定 agent：
+
+```json
+{
+  "bindings": [
+    {
+      "agentId": "xxx",
+      "match": {
+        "channel": "napcat",
+        "peer": {
+          "kind": "group",
+          "id": "群号1"
+        }
+      }
+    }
+  ]
+}
+```
 
 ---
 
 ## 完整配置示例
-
-如果你想一次把常用项都配好，可以参考下面这份：
 
 ```json
 {
@@ -731,6 +428,9 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
       "groupWhitelist": ["123456789", "987654321"],
       "groupMentionOnly": true,
       "plainTextMode": true,
+      "streaming_mode": false,
+      "enablePrivateTypingStatus": true,
+      "enable_progress_messages": false,
       "mediaProxyEnabled": true,
       "publicBaseUrl": "http://127.0.0.1:18789",
       "mediaProxyToken": "change-me",
@@ -756,122 +456,11 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
 
 ---
 
-## 配置项说明（按人话解释）
-
-下面是主要配置项的作用。
-
-| 配置项 | 类型 | 这是干什么的 | 默认值 |
-|---|---|---|---|
-| `url` | string | NapCat 的 HTTP 服务地址 | `http://127.0.0.1:15150` |
-| `agentId` | string | 固定把消息交给哪个 OpenClaw agent 处理；留空时按 OpenClaw 路由（可配 bindings） | `""` |
-| `allowUsers` | string[] | 只允许这些 QQ 号触发机器人；空数组表示不过滤 | `[]` |
-| `enableGroupMessages` | boolean | 是否处理群消息 | `false` |
-| `groupWhitelist` | string[] | 只允许这些群号触发机器人；空数组表示不过滤群 | `[]` |
-| `streaming_mode` | boolean | 是否启用流式传输模式；开启后会按处理步骤连续发送 QQ 消息 | `false` |
-| `plainTextMode` | boolean | 是否把发往 QQ 的 Markdown 风格文字转成纯文本 | `true` |
-| `enablePrivateTypingStatus` | boolean | 是否在私聊处理中调用 NapCat 的输入状态接口，显示 QQ “正在输入” | `true` |
-| `groupMentionOnly` | boolean | 群里是否必须 @ 机器人才处理 | `true` |
-| `mediaProxyEnabled` | boolean | 是否开启媒体代理，解决跨机器图片/语音发送问题 | `false` |
-| `publicBaseUrl` | string | OpenClaw 对 NapCat 可访问的地址 | `""` |
-| `mediaProxyToken` | string | 媒体代理的访问令牌（可选） | `""` |
-| `voiceBasePath` | string | 相对语音文件名的基础目录 | `""` |
-| `groupFileFolder` | string | 群文件默认上传目录 | `""` |
-| `groupFileHostPrefix` | string | 宿主机上已挂载进容器的目录前缀 | `""` |
-| `groupFileContainerPrefix` | string | 上面那个目录在容器里的对应路径 | `""` |
-| `groupFileStageHostDir` | string | 宿主机上的上传暂存目录 | `""` |
-| `groupFileStageContainerDir` | string | 上面暂存目录在容器里的对应路径 | `""` |
-| `enableInboundLogging` | boolean | 是否记录收到的消息日志 | `true` |
-| `inboundLogDir` | string | 入站日志目录 | `./logs/napcat-inbound` |
-| `enable_progress_messages` | boolean | 是否将 OpenClaw 的 commentary 进度消息投递到 QQ | `false` |
-
----
-
-### Agent 怎么知道自己用的是哪个 QQ 号
-
-NapCat 入站事件会带上机器人自己的 QQ 号（`self_id`）。插件会优先使用这个值，缺失时回退到配置里的 `selfId`。
-
-在交给 OpenClaw agent 的当前消息上下文里，插件会提供这些字段：
-
-- `SelfId`
-- `BotId`
-- `BotQQ`
-- `NapCatSelfId`
-
-同时，模型可见的 `BodyForAgent` 会在原消息前追加一行：
-
-```text
-[NapCat context: bot QQ=<机器人QQ号>]
-```
-
-这样 agent 在同一个 QQ 群里处理消息时，也能明确知道“我现在是哪个 QQ 号”。
-
----
-
-### 如果想按群路由到不同 agent
-
-现在 NapCat 插件会把会话信息作为 `peer` 传给 OpenClaw 的路由器，你可以在 `openclaw.json` 里用 `bindings` 为特定群指定 agent：
-
-```json
-"bindings": [
-  {
-    "agentId": "xxx",
-    "match": {
-      "channel": "napcat",
-      "peer": {
-        "kind": "group",
-        "id": "群号1"
-      }
-    }
-  },
-  {
-    "agentId": "yyy",
-    "match": {
-      "channel": "napcat",
-      "peer": {
-        "kind": "group",
-        "id": "群号2"
-      }
-    }
-  }
-]
-```
-
----
-
-### 进度消息（commentary）需要 verbose 模式
-
-`enable_progress_messages` 控制是否把 OpenClaw 的 commentary 进度消息（比如工具调用过程中的中间状态）投递到 QQ。
-
-**但有个重要前提**：OpenClaw 核心的 commentary 消息投递依赖 verbose 模式。如果 verbose 是关闭的（默认就是关闭），即使 `enable_progress_messages` 设为 `true`，进度消息也不会产生。
-
-所以你需要同时开启 verbose：
-
-**方法 1：单次会话开启（临时）**
-```
-/verbose on
-```
-
-**方法 2：全局默认开启（推荐）**
-在 `openclaw.json` 里设置：
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "verboseDefault": "on"
-    }
-  }
-}
-```
-
-这样所有会话默认都会投递 commentary 进度消息。
-
----
-
 ## 常见问题
 
 ### 1. 私聊能用，群里没反应
-先检查：
+
+检查：
 
 - `enableGroupMessages` 有没有设成 `true`
 - `groupWhitelist` 有没有把当前群拦掉
@@ -879,29 +468,26 @@ NapCat 入站事件会带上机器人自己的 QQ 号（`self_id`）。插件会
 - 你在群里有没有真的 @ 到机器人
 - `allowUsers` 有没有把发消息的人拦掉
 
----
-
 ### 2. 消息到了 NapCat，但 OpenClaw 没回复
-先检查：
+
+检查：
 
 - NapCat 的 Http 客户端 URL 是否正确
 - OpenClaw Gateway 是否正在运行
 - 插件是否真的安装并启用
-- 查看 `inboundLogDir` 里的日志，看消息有没有进入插件
-
----
+- 查看 `inboundLogDir` 里的日志
 
 ### 3. 文字能发，图片发不出去
-大概率是下面这些问题：
+
+大概率是：
 
 - OpenClaw 和 NapCat 不在同一台机器上
 - `mediaProxyEnabled` 没开
 - `publicBaseUrl` 填错了
 - NapCat 根本访问不到 OpenClaw 提供的媒体地址
 
----
-
 ### 4. 群文件上传失败
+
 大概率是路径问题：
 
 - 你传的不是本地文件路径
@@ -909,21 +495,13 @@ NapCat 入站事件会带上机器人自己的 QQ 号（`self_id`）。插件会
 - `groupFileHostPrefix / groupFileContainerPrefix` 没配置好
 - 或者 `groupFileStageHostDir / groupFileStageContainerDir` 没配置好
 
-如果你是 Docker 部署，这一条最容易踩坑。
-
----
-
 ### 5. 纯数字 target 发错地方了
-如果你只写纯数字目标，插件会默认按**私聊**处理。  
-要发群消息，请明确写：
 
-```text
-group:<群号>
-```
+只写纯数字会被当成私聊，发群消息请明确写 `group:<群号>`。
 
 ---
 
-## 项目结构（给需要看代码的人）
+## 项目结构
 
 ```text
 openclaw-napcat-plugin/
@@ -937,7 +515,7 @@ openclaw-napcat-plugin/
 └── skill/
     └── napcat-qq         # 配套 skill
         └── scripts/
-            └── qq-contact-search.js   # 联系人搜索脚本，npm 包默认不包含，需按需手动安装
+            └── qq-contact-search.js   # 联系人搜索脚本，npm 包默认不包含
 ```
 
 ---
