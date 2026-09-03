@@ -1,6 +1,6 @@
 {
   "name": "@propersama/openclaw-napcat",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "private": false,
   "description": "QQ chat channel plugin for OpenClaw via NapCat (OneBot 11)",
   "repository": {
@@ -49,6 +49,9 @@
     "extensions": [
       "./dist/index.js"
     ],
+    "compat": {
+      "pluginApi": ">=2026.8.2"
+    },
     "install": {
       "npmSpec": "@propersama/openclaw-napcat",
       "minHostVersion": ">=2026.8.2"

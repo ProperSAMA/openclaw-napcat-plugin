@@ -27,3 +27,17 @@ test("keeps runtime and manifest channel schemas identical", async () => {
     manifest.channelConfigs.napcat.schema,
   );
 });
+
+test("keeps package, lockfile, manifest, and host compatibility metadata aligned", async () => {
+  const [packageJson, packageLock, manifest] = await Promise.all(
+    ["../package.json", "../package-lock.json", "../openclaw.plugin.json"].map(async (path) => (
+      JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"))
+    )),
+  );
+
+  assert.equal(packageJson.version, packageLock.version);
+  assert.equal(packageJson.version, packageLock.packages[""].version);
+  assert.equal(packageJson.version, manifest.version);
+  assert.equal(packageJson.peerDependencies.openclaw, packageJson.openclaw.compat.pluginApi);
+  assert.equal(packageJson.peerDependencies.openclaw, packageJson.openclaw.install.minHostVersion);
+});
