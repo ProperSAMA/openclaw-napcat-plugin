@@ -11,7 +11,7 @@ const plugin = {
   configSchema: emptyPluginConfigSchema(),
   register(api: OpenClawPluginApi) {
     setNapCatRuntime(api.runtime);
-    api.registerChannel({ plugin: napcatPlugin as any });
+    api.registerChannel({ plugin: napcatPlugin });
 
     // Compatibility: old SDKs expose registerHttpHandler, newer SDKs prefer registerHttpRoute.
     const anyApi = api as any;

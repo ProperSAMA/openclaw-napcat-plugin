@@ -2,7 +2,7 @@
 import path from "node:path";
 import { access, copyFile, mkdir, unlink } from "node:fs/promises";
 import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-contract";
-import type { ChannelMessagingAdapter } from "openclaw/plugin-sdk/core";
+import type { ChannelMessagingAdapter, ChannelPlugin } from "openclaw/plugin-sdk/core";
 import { buildAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import {
     jsonResult,
@@ -321,12 +321,15 @@ export const napcatPlugin = {
     id: "napcat",
     meta: {
         id: "napcat",
-        name: "NapCatQQ",
-        systemImage: "message"
+        label: "NapCat QQ",
+        selectionLabel: "NapCat QQ (OneBot 11)",
+        docsPath: "/channels/napcat",
+        blurb: "Connect OpenClaw to QQ through NapCat and OneBot 11.",
+        systemImage: "message",
+        markdownCapable: false,
     },
     capabilities: {
         chatTypes: ["direct", "group"],
-        text: true,
         media: true,
         reactions: true,
         blockStreaming: true
@@ -337,13 +340,14 @@ export const napcatPlugin = {
     messaging: napcatMessaging,
     actions: napcatMessageActions,
     configSchema: {
-        type: "object",
-        properties: {
+        schema: {
+            type: "object",
+            properties: {
             url: { type: "string", title: "NapCat HTTP URL", default: "http://127.0.0.1:15150" },
             agentId: {
                 type: "string",
-                title: "Fixed Agent ID",
-                description: "Optional: force all NapCat inbound sessions to use this OpenClaw agent ID",
+                title: "Default Agent ID",
+                description: "Optional default OpenClaw agent for NapCat; explicit OpenClaw bindings take precedence",
                 default: ""
             },
             allowUsers: {
@@ -375,7 +379,7 @@ export const napcatPlugin = {
             enable_progress_messages: {
                 type: "boolean",
                 title: "Enable Progress Messages",
-                description: "把 assistant 工作过程中的中间进度消息也发送到 QQ（throttled to 1 per 3s per conversation）",
+                description: "Send assistant intermediate progress (commentary) messages to QQ as well, throttled to 1 per 3s per conversation",
                 default: false
             },
             plainTextMode: {
@@ -468,7 +472,8 @@ export const napcatPlugin = {
                 description: "Token for authenticating with NapCat HTTP server (Bearer token)",
                 default: ""
             }
-        }
+            }
+        },
     },
     config: {
         listAccountIds: () => ["default"],
@@ -669,4 +674,4 @@ export const napcatPlugin = {
             });
         }
     }
-};
+} satisfies ChannelPlugin;

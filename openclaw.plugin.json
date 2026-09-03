@@ -20,8 +20,8 @@
           },
           "agentId": {
             "type": "string",
-            "title": "Fixed Agent ID",
-            "description": "Optional: force all NapCat inbound sessions to use this OpenClaw agent ID",
+            "title": "Default Agent ID",
+            "description": "Optional default OpenClaw agent for NapCat; explicit OpenClaw bindings take precedence",
             "default": ""
           },
           "allowUsers": {
