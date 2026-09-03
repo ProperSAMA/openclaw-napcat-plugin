@@ -30,6 +30,45 @@ function isNapCatProgressMessagesEnabled(config: any): boolean {
     return config?.enable_progress_messages === true;
 }
 
+export function resolveOpenClawRuntimeConfig(runtime: any): any {
+    const current = runtime?.config?.current;
+    if (typeof current === "function") {
+        return current.call(runtime.config) || {};
+    }
+
+    const legacyLoadConfig = runtime?.config?.loadConfig;
+    if (typeof legacyLoadConfig === "function") {
+        return legacyLoadConfig.call(runtime.config) || {};
+    }
+
+    throw new Error("NapCat plugin: OpenClaw runtime config snapshot API is unavailable");
+}
+
+export async function resolveNapCatInboundRoute(
+    runtime: any,
+    cfg: any,
+    configuredAgentId: string,
+    peer: { kind: "direct" | "group"; id: string },
+): Promise<{ route: any; effectiveAgentId: string; sessionKey: string }> {
+    const normalizedConfiguredAgentId = String(configuredAgentId || "").trim().toLowerCase();
+    const route = await runtime.channel.routing.resolveAgentRoute({
+        cfg,
+        channel: "napcat",
+        defaultAgentId: normalizedConfiguredAgentId || undefined,
+        accountId: "default",
+        peer,
+    });
+
+    const routeAgentId = String(route?.agentId || "").trim().toLowerCase();
+    const effectiveAgentId = routeAgentId || normalizedConfiguredAgentId || "main";
+    const sessionKey = String(route?.sessionKey || "").trim();
+    if (!sessionKey) {
+        throw new Error("NapCat plugin: OpenClaw route did not provide a session key");
+    }
+
+    return { route, effectiveAgentId, sessionKey };
+}
+
 // Throttle assistant commentary (progress) messages so long multi-tool tasks
 // do not flood QQ. Final (non-commentary) payloads are never throttled.
 const COMMENTARY_MIN_INTERVAL_MS = 3000;
@@ -853,27 +892,21 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             const conversationId = isGroup ? `group:${event.group_id}` : `private:${senderId}`;
             const senderName = event.sender?.nickname || senderId;
 
-            // Generate NapCat base session key by conversation type
-            // Base format: session:napcat:private:{userId} or session:napcat:group:{groupId}
-            const baseSessionKey = isGroup 
-                ? `session:napcat:group:${event.group_id}`
-                : `session:napcat:private:${senderId}`;
-            const cfg = runtime.config?.loadConfig?.() || {};
-            const peer = isGroup
+            const cfg = resolveOpenClawRuntimeConfig(runtime);
+            const peer: { kind: "direct" | "group"; id: string } = isGroup
                 ? { kind: "group", id: String(event.group_id) }
                 : { kind: "direct", id: senderId };
+            const configuredAgentId = String(config.agentId || "").trim().toLowerCase();
 
-            // Resolve route for this message with specific session key
-            // Note: OpenClaw SDK ignores the sessionKey param, so we must override it after
-            const route = await runtime.channel.routing.resolveAgentRoute({
-                channel: "napcat",
-                conversationId,
-                senderId,
-                text,
+            // Let OpenClaw own agent selection and canonical session-key construction.
+            // A configured NapCat agent is the default owner; explicit OpenClaw bindings
+            // remain authoritative and can select a different agent or session scope.
+            const { route, effectiveAgentId, sessionKey } = await resolveNapCatInboundRoute(
+                runtime,
                 cfg,
-                ctx: {},
+                configuredAgentId,
                 peer,
-            });
+            );
 
             if (!route?.agentId) {
                 console.log("[NapCat] No route found for message, ignoring");
@@ -883,10 +916,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                 return true;
             }
 
-            const configuredAgentId = String(config.agentId || "").trim().toLowerCase();
             const routeAgentId = String(route.agentId || "").trim().toLowerCase();
-            const effectiveAgentId = routeAgentId || configuredAgentId || "main";
-            const sessionKey = `agent:${effectiveAgentId}:${baseSessionKey}`;
             const ackReaction = resolveAckReaction(cfg, effectiveAgentId, {
                 channel: "napcat",
                 accountId: route.accountId,
@@ -929,12 +959,8 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             // Log for debugging
             console.log(`[NapCat] Inbound from ${senderId} (session: ${sessionKey}): ${text.substring(0, 50)}...`);
             if (configuredAgentId && configuredAgentId !== routeAgentId) {
-                console.log(`[NapCat] Route agent (${routeAgentId || "none"}) differs from configured agent (${configuredAgentId}); route takes precedence`);
+                console.log(`[NapCat] OpenClaw binding routed configured agent ${configuredAgentId} to ${routeAgentId || "none"}`);
             }
-
-            // Force our custom session key and configured agent
-            route.agentId = effectiveAgentId;
-            route.sessionKey = sessionKey;
 
             // Build ctxPayload using runtime methods
             const ctxPayload = {

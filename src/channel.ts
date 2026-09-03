@@ -3,6 +3,7 @@ import path from "node:path";
 import { access, copyFile, mkdir, unlink } from "node:fs/promises";
 import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-contract";
 import type { ChannelMessagingAdapter } from "openclaw/plugin-sdk/core";
+import { buildAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import {
     jsonResult,
     readReactionParams,
@@ -225,15 +226,27 @@ const resolveNapCatOutboundSessionRoute: NonNullable<ChannelMessagingAdapter["re
     if (!parsed) return null;
     const agentId = String(params.agentId || "").trim().toLowerCase() || "main";
     const conversationType = parsed.chatType === "group" ? "group" : "private";
-    // Must match the inbound canonical session key built in webhook.ts:
-    // `agent:${agentId}:session:napcat:(private|group):${id}`
-    const sessionKey = `agent:${agentId}:session:napcat:${conversationType}:${parsed.peerId}`;
+    const peer = { kind: parsed.chatType, id: parsed.peerId } as const;
+    const sessionConfig = params.cfg.session as any;
+    // The current SDK accepts mainKey/groupScope; the cast keeps the plugin
+    // buildable against the older supported SDK until the dependency floor is raised.
+    const buildSessionKey = buildAgentSessionKey as (options: Record<string, unknown>) => string;
+    const sessionKey = buildSessionKey({
+        agentId,
+        mainKey: sessionConfig?.mainKey,
+        channel: "napcat",
+        accountId: params.accountId,
+        peer,
+        dmScope: sessionConfig?.dmScope,
+        groupScope: sessionConfig?.groupScope,
+        identityLinks: sessionConfig?.identityLinks,
+    });
     const conversationId = `${conversationType}:${parsed.peerId}`;
     return {
         sessionKey,
-        // SDK semantics: session key minus any thread suffix (none for NapCat).
         baseSessionKey: sessionKey,
-        peer: { kind: parsed.chatType, id: parsed.peerId },
+        recipientSessionExact: true,
+        peer,
         chatType: parsed.chatType,
         from: `napcat:${conversationId}`,
         // Core uses route.to as the delivery target handed to outbound.sendText,
