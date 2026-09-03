@@ -147,7 +147,8 @@ openclaw gateway restart
 |---|---|---|---|
 | `mediaProxyEnabled` | boolean | 是否开启媒体代理，解决跨机器图片/语音发送问题 | `false` |
 | `publicBaseUrl` | string | OpenClaw 对 NapCat 可访问的地址 | `""` |
-| `mediaProxyToken` | string | 媒体代理的访问令牌（可选） | `""` |
+| `mediaProxyToken` | string | 媒体代理访问令牌；启用代理时必填 | `""` |
+| `mediaProxyAllowedRoots` | string[] | 允许代理读取本地媒体的宿主机绝对目录 | `[]` |
 
 ### 语音和文件
 
@@ -320,15 +321,22 @@ openclaw gateway restart
       "url": "http://192.168.1.20:15150",
       "mediaProxyEnabled": true,
       "publicBaseUrl": "http://192.168.1.10:18789",
-      "mediaProxyToken": "change-me"
+      "mediaProxyToken": "请替换成足够长的随机令牌",
+      "mediaProxyAllowedRoots": ["/srv/openclaw/media"]
     }
   }
 }
 ```
 
 - `publicBaseUrl` 必须是 NapCat 能访问到的地址
-- 如果设置了 `mediaProxyToken`，两边请求必须带上正确 token
+- 启用代理时必须设置非空 `mediaProxyToken`，否则代理会拒绝服务
+- 本地文件必须位于 `mediaProxyAllowedRoots` 或 `voiceBasePath` 下；空列表不会授权任意目录
+- 远程 URL 会经过 OpenClaw 的 SSRF 防护、DNS 固定和逐跳重定向检查
+- 单个媒体最大 25 MiB，并受请求与分块读取超时约束；仅接受图片和音频，主动拒绝 SVG
+- token 会出现在 NapCat 回取的查询参数中，请使用 HTTPS，并避免让反向代理记录查询串
 - 防火墙 / Docker 端口映射 / 局域网访问都要打通
+
+从旧版本升级时，如果原配置仅设置了 `mediaProxyEnabled: true`，必须补齐 token；需要代理本地文件时还要显式增加允许目录。这是有意的安全收紧。
 
 ---
 
@@ -434,6 +442,7 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
       "mediaProxyEnabled": true,
       "publicBaseUrl": "http://127.0.0.1:18789",
       "mediaProxyToken": "change-me",
+      "mediaProxyAllowedRoots": ["/your/media/path"],
       "voiceBasePath": "/your/voice/path",
       "groupFileFolder": "",
       "groupFileHostPrefix": "",
@@ -484,6 +493,8 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
 - OpenClaw 和 NapCat 不在同一台机器上
 - `mediaProxyEnabled` 没开
 - `publicBaseUrl` 填错了
+- `mediaProxyToken` 没有配置或不匹配
+- 本地文件不在 `mediaProxyAllowedRoots` / `voiceBasePath` 允许范围内
 - NapCat 根本访问不到 OpenClaw 提供的媒体地址
 
 ### 4. 群文件上传失败

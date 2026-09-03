@@ -9,7 +9,7 @@ import {
     readReactionParams,
     resolveReactionMessageId,
 } from "openclaw/plugin-sdk/channel-actions";
-import { buildNapCatMediaCq, isAudioMedia, resolveLocalFilePath } from "./media.js";
+import { buildNapCatMediaCq, isAudioMedia, redactNapCatMediaForLog, resolveLocalFilePath } from "./media.js";
 import { formatNapCatOutgoingText } from "./plainText.js";
 import { resolveNapCatEmojiId } from "./reactions.js";
 import { getNapCatGroupReplyMentionUser, setNapCatConfig } from "./runtime.js";
@@ -415,8 +415,15 @@ export const napcatPlugin = {
             mediaProxyToken: {
                 type: "string",
                 title: "Media Proxy Token",
-                description: "Optional token required by /napcat/media endpoint",
+                description: "Required access token when the media proxy is enabled",
                 default: ""
+            },
+            mediaProxyAllowedRoots: {
+                type: "array",
+                items: { type: "string" },
+                title: "Media Proxy Allowed Roots",
+                description: "Absolute host directories whose local media files may be served by the proxy",
+                default: []
             },
             voiceBasePath: {
                 type: "string",
@@ -652,7 +659,7 @@ export const napcatPlugin = {
             if (targetType === "group") payload.group_id = targetId;
             else payload.user_id = targetId;
 
-            console.log(`[NapCat] Sending media to ${targetType} ${targetId}: ${message}`);
+            console.log(`[NapCat] Sending media to ${targetType} ${targetId}: ${redactNapCatMediaForLog(message)}`);
 
             const deliveryKey = `${endpoint}\u0000${targetId}\u0000${message}`;
             const result = await sendTextToNapCatOnce(

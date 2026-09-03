@@ -1,7 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk/plugin-entry";
 import { napcatPlugin } from "./src/channel.js";
-import { handleNapCatWebhook } from "./src/webhook.js";
+import { handleNapCatMediaProxy, handleNapCatWebhook } from "./src/webhook.js";
 import { setNapCatRuntime } from "./src/runtime.js";
 
 const plugin = {
@@ -13,19 +13,18 @@ const plugin = {
     setNapCatRuntime(api.runtime);
     api.registerChannel({ plugin: napcatPlugin });
 
-    // Compatibility: old SDKs expose registerHttpHandler, newer SDKs prefer registerHttpRoute.
-    const anyApi = api as any;
-    if (typeof anyApi.registerHttpRoute === "function") {
-      anyApi.registerHttpRoute({
-        path: "/napcat",
-        handler: handleNapCatWebhook,
-        auth: "plugin",
-      });
-    } else if (typeof anyApi.registerHttpHandler === "function") {
-      anyApi.registerHttpHandler(handleNapCatWebhook);
-    } else {
-      throw new Error("NapCat plugin: no HTTP registration API found (registerHttpRoute/registerHttpHandler)");
-    }
+    api.registerHttpRoute({
+      path: "/napcat",
+      match: "exact",
+      handler: handleNapCatWebhook,
+      auth: "plugin",
+    });
+    api.registerHttpRoute({
+      path: "/napcat/media",
+      match: "exact",
+      handler: handleNapCatMediaProxy,
+      auth: "plugin",
+    });
   },
 };
 

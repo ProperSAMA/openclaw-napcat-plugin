@@ -1,11 +1,11 @@
 import { Agent as HttpAgent, request as httpRequest } from "node:http";
 import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createReadStream } from "node:fs";
-import { appendFile, mkdir, stat } from "node:fs/promises";
-import { dirname, extname, resolve } from "node:path";
+import { appendFile, mkdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { resolveAckReaction } from "openclaw/plugin-sdk/channel-feedback";
-import { buildNapCatMediaCq } from "./media.js";
+import { buildNapCatMediaCq, redactNapCatMediaForLog } from "./media.js";
+import { loadMediaProxyResource, MediaProxyError, mediaProxyTokensMatch } from "./mediaProxy.js";
 import { formatNapCatOutgoingText } from "./plainText.js";
 import { resolveNapCatEmojiId, shouldSendNapCatAckReaction } from "./reactions.js";
 import {
@@ -323,19 +323,11 @@ export async function buildNapCatMessageFromReply(
     return message;
 }
 
-function getContentTypeByPath(filePath: string): string {
-    const ext = extname(filePath).toLowerCase();
-    if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
-    if (ext === ".png") return "image/png";
-    if (ext === ".gif") return "image/gif";
-    if (ext === ".webp") return "image/webp";
-    if (ext === ".bmp") return "image/bmp";
-    if (ext === ".svg") return "image/svg+xml";
-    return "application/octet-stream";
-}
-
-async function handleMediaProxyRequest(res: ServerResponse, url: string): Promise<boolean> {
-    const config = getNapCatConfig();
+export async function handleMediaProxyRequest(
+    res: ServerResponse,
+    url: string,
+    config: any = getNapCatConfig(),
+): Promise<boolean> {
     if (config.mediaProxyEnabled !== true) {
         res.statusCode = 404;
         res.end("not found");
@@ -351,7 +343,12 @@ async function handleMediaProxyRequest(res: ServerResponse, url: string): Promis
 
     const expectedToken = String(config.mediaProxyToken || "").trim();
     const token = String(parsed.searchParams.get("token") || "").trim();
-    if (expectedToken && token !== expectedToken) {
+    if (!expectedToken) {
+        res.statusCode = 503;
+        res.end("media proxy is not configured");
+        return true;
+    }
+    if (!mediaProxyTokensMatch(expectedToken, token)) {
         res.statusCode = 403;
         res.end("forbidden");
         return true;
@@ -365,50 +362,35 @@ async function handleMediaProxyRequest(res: ServerResponse, url: string): Promis
     }
 
     try {
-        if (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://")) {
-            const upstream = await fetch(mediaUrl);
-            if (!upstream.ok) {
-                res.statusCode = 502;
-                res.end(`upstream fetch failed: ${upstream.status}`);
-                return true;
-            }
-            const contentType = upstream.headers.get("content-type") || "application/octet-stream";
-            res.statusCode = 200;
-            res.setHeader("Content-Type", contentType);
-            const buffer = Buffer.from(await upstream.arrayBuffer());
-            res.setHeader("Content-Length", buffer.length);
-            res.end(buffer);
-            return true;
-        }
-
-        let filePath = mediaUrl;
-        if (mediaUrl.startsWith("file://")) {
-            filePath = decodeURIComponent(new URL(mediaUrl).pathname);
-        }
-        if (!filePath.startsWith("/")) {
-            res.statusCode = 400;
-            res.end("unsupported media url");
-            return true;
-        }
-
-        const fileStat = await stat(filePath);
-        if (!fileStat.isFile()) {
-            res.statusCode = 404;
-            res.end("file not found");
-            return true;
-        }
-
+        const resource = await loadMediaProxyResource(mediaUrl, config);
         res.statusCode = 200;
-        res.setHeader("Content-Type", getContentTypeByPath(filePath));
-        res.setHeader("Content-Length", fileStat.size);
-        createReadStream(filePath).pipe(res);
+        res.setHeader("Content-Type", resource.contentType);
+        res.setHeader("Content-Length", resource.buffer.length);
+        res.setHeader("Content-Disposition", "attachment");
+        res.setHeader("Cache-Control", "private, no-store");
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.end(resource.buffer);
         return true;
-    } catch (err) {
-        console.error("[NapCat] Media proxy error:", err);
-        res.statusCode = 500;
+    } catch (err: any) {
+        const statusCode = err instanceof MediaProxyError ? err.statusCode : 500;
+        const code = err instanceof MediaProxyError ? err.code : "INTERNAL_ERROR";
+        console.error(`[NapCat] Media proxy request failed: ${code}`);
+        res.statusCode = statusCode;
         res.end("media proxy error");
         return true;
     }
+}
+
+export async function handleNapCatMediaProxy(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+    const pathname = new URL(req.url || "", "http://127.0.0.1").pathname;
+    if (pathname !== "/napcat/media") return false;
+    console.log(`[NapCat] Incoming request: ${req.method || "UNKNOWN"} ${pathname}`);
+    if (req.method !== "GET") {
+        res.statusCode = 405;
+        res.end("method not allowed");
+        return true;
+    }
+    return handleMediaProxyRequest(res, req.url || "");
 }
 
 async function readBody(req: IncomingMessage): Promise<any> {
@@ -716,15 +698,9 @@ function extractNapCatEvents(body: any): any[] {
 export async function handleNapCatWebhook(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     const url = req.url || "";
     const method = req.method || "UNKNOWN";
-    
-    console.log(`[NapCat] Incoming request: ${method} ${url}`);
-    
-    // Accept /napcat, /napcat/, or any path starting with /napcat
-    if (!url.startsWith("/napcat")) return false;
-
-    if (method === "GET") {
-        return handleMediaProxyRequest(res, url);
-    }
+    const pathname = new URL(url, "http://127.0.0.1").pathname;
+    if (pathname !== "/napcat") return false;
+    console.log(`[NapCat] Incoming request: ${method} ${pathname}`);
     
     if (method !== "POST") {
         // For non-POST requests to /napcat endpoints, return 405
@@ -1043,7 +1019,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         if (isGroup) msgPayload.group_id = targetId;
                         else msgPayload.user_id = targetId;
                         
-                        console.log(`[NapCat] Sending reply to ${isGroup ? 'group' : 'private'} ${targetId}: ${message.substring(0, 50)}...`);
+                        console.log(`[NapCat] Sending reply to ${isGroup ? 'group' : 'private'} ${targetId}: ${redactNapCatMediaForLog(message).substring(0, 50)}...`);
                         try {
                             await sendToNapCat(`${baseUrl}${endpoint}`, msgPayload, token, { allowRetry: false });
                             console.log("[NapCat] Reply sent successfully");
@@ -1100,7 +1076,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         if (isGroup) msgPayload.group_id = targetId;
                         else msgPayload.user_id = targetId;
                         
-                        console.log(`[NapCat] Sending reply to ${isGroup ? 'group' : 'private'} ${targetId}: ${message.substring(0, 50)}...`);
+                        console.log(`[NapCat] Sending reply to ${isGroup ? 'group' : 'private'} ${targetId}: ${redactNapCatMediaForLog(message).substring(0, 50)}...`);
                         try {
                             await sendToNapCat(`${baseUrl}${endpoint}`, msgPayload, token, { allowRetry: false });
                             console.log("[NapCat] Reply sent successfully");

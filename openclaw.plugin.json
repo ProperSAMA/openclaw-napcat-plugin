@@ -89,8 +89,15 @@
           "mediaProxyToken": {
             "type": "string",
             "title": "Media Proxy Token",
-            "description": "Optional token required by /napcat/media endpoint",
+            "description": "Required access token when the media proxy is enabled",
             "default": ""
+          },
+          "mediaProxyAllowedRoots": {
+            "type": "array",
+            "items": { "type": "string" },
+            "title": "Media Proxy Allowed Roots",
+            "description": "Absolute host directories whose local media files may be served by the proxy",
+            "default": []
           },
           "voiceBasePath": {
             "type": "string",
