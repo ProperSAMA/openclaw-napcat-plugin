@@ -1,7 +1,7 @@
 {
   "id": "napcat",
   "name": "NapCat QQ",
-  "version": "1.0.8",
+  "version": "1.0.12",
   "description": "QQ chat channel plugin for OpenClaw via NapCat (OneBot 11)",
   "author": "ProperSAMA",
   "channels": ["napcat"],
@@ -20,8 +20,8 @@
           },
           "agentId": {
             "type": "string",
-            "title": "Fixed Agent ID",
-            "description": "Optional: force all NapCat inbound sessions to use this OpenClaw agent ID",
+            "title": "Default Agent ID",
+            "description": "Optional default OpenClaw agent for NapCat; explicit OpenClaw bindings take precedence",
             "default": ""
           },
           "allowUsers": {
@@ -89,8 +89,15 @@
           "mediaProxyToken": {
             "type": "string",
             "title": "Media Proxy Token",
-            "description": "Optional token required by /napcat/media endpoint",
+            "description": "Required access token when the media proxy is enabled",
             "default": ""
+          },
+          "mediaProxyAllowedRoots": {
+            "type": "array",
+            "items": { "type": "string" },
+            "title": "Media Proxy Allowed Roots",
+            "description": "Absolute host directories whose local media files may be served by the proxy",
+            "default": []
           },
           "voiceBasePath": {
             "type": "string",

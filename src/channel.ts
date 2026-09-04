@@ -2,13 +2,14 @@
 import path from "node:path";
 import { access, copyFile, mkdir, unlink } from "node:fs/promises";
 import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-contract";
-import type { ChannelMessagingAdapter } from "openclaw/plugin-sdk/core";
+import type { ChannelMessagingAdapter, ChannelPlugin } from "openclaw/plugin-sdk/core";
+import { buildAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import {
     jsonResult,
     readReactionParams,
     resolveReactionMessageId,
 } from "openclaw/plugin-sdk/channel-actions";
-import { buildNapCatMediaCq, isAudioMedia, resolveLocalFilePath } from "./media.js";
+import { buildNapCatMediaCq, isAudioMedia, redactNapCatMediaForLog, resolveLocalFilePath } from "./media.js";
 import { formatNapCatOutgoingText } from "./plainText.js";
 import { resolveNapCatEmojiId } from "./reactions.js";
 import { getNapCatGroupReplyMentionUser, setNapCatConfig } from "./runtime.js";
@@ -225,15 +226,27 @@ const resolveNapCatOutboundSessionRoute: NonNullable<ChannelMessagingAdapter["re
     if (!parsed) return null;
     const agentId = String(params.agentId || "").trim().toLowerCase() || "main";
     const conversationType = parsed.chatType === "group" ? "group" : "private";
-    // Must match the inbound canonical session key built in webhook.ts:
-    // `agent:${agentId}:session:napcat:(private|group):${id}`
-    const sessionKey = `agent:${agentId}:session:napcat:${conversationType}:${parsed.peerId}`;
+    const peer = { kind: parsed.chatType, id: parsed.peerId } as const;
+    const sessionConfig = params.cfg.session as any;
+    // The current SDK accepts mainKey/groupScope; the cast keeps the plugin
+    // buildable against the older supported SDK until the dependency floor is raised.
+    const buildSessionKey = buildAgentSessionKey as (options: Record<string, unknown>) => string;
+    const sessionKey = buildSessionKey({
+        agentId,
+        mainKey: sessionConfig?.mainKey,
+        channel: "napcat",
+        accountId: params.accountId,
+        peer,
+        dmScope: sessionConfig?.dmScope,
+        groupScope: sessionConfig?.groupScope,
+        identityLinks: sessionConfig?.identityLinks,
+    });
     const conversationId = `${conversationType}:${parsed.peerId}`;
     return {
         sessionKey,
-        // SDK semantics: session key minus any thread suffix (none for NapCat).
         baseSessionKey: sessionKey,
-        peer: { kind: parsed.chatType, id: parsed.peerId },
+        recipientSessionExact: true,
+        peer,
         chatType: parsed.chatType,
         from: `napcat:${conversationId}`,
         // Core uses route.to as the delivery target handed to outbound.sendText,
@@ -308,12 +321,15 @@ export const napcatPlugin = {
     id: "napcat",
     meta: {
         id: "napcat",
-        name: "NapCatQQ",
-        systemImage: "message"
+        label: "NapCat QQ",
+        selectionLabel: "NapCat QQ (OneBot 11)",
+        docsPath: "/channels/napcat",
+        blurb: "Connect OpenClaw to QQ through NapCat and OneBot 11.",
+        systemImage: "message",
+        markdownCapable: false,
     },
     capabilities: {
         chatTypes: ["direct", "group"],
-        text: true,
         media: true,
         reactions: true,
         blockStreaming: true
@@ -324,13 +340,14 @@ export const napcatPlugin = {
     messaging: napcatMessaging,
     actions: napcatMessageActions,
     configSchema: {
-        type: "object",
-        properties: {
+        schema: {
+            type: "object",
+            properties: {
             url: { type: "string", title: "NapCat HTTP URL", default: "http://127.0.0.1:15150" },
             agentId: {
                 type: "string",
-                title: "Fixed Agent ID",
-                description: "Optional: force all NapCat inbound sessions to use this OpenClaw agent ID",
+                title: "Default Agent ID",
+                description: "Optional default OpenClaw agent for NapCat; explicit OpenClaw bindings take precedence",
                 default: ""
             },
             allowUsers: {
@@ -362,7 +379,7 @@ export const napcatPlugin = {
             enable_progress_messages: {
                 type: "boolean",
                 title: "Enable Progress Messages",
-                description: "把 assistant 工作过程中的中间进度消息也发送到 QQ（throttled to 1 per 3s per conversation）",
+                description: "Send assistant intermediate progress (commentary) messages to QQ as well, throttled to 1 per 3s per conversation",
                 default: false
             },
             plainTextMode: {
@@ -398,8 +415,15 @@ export const napcatPlugin = {
             mediaProxyToken: {
                 type: "string",
                 title: "Media Proxy Token",
-                description: "Optional token required by /napcat/media endpoint",
+                description: "Required access token when the media proxy is enabled",
                 default: ""
+            },
+            mediaProxyAllowedRoots: {
+                type: "array",
+                items: { type: "string" },
+                title: "Media Proxy Allowed Roots",
+                description: "Absolute host directories whose local media files may be served by the proxy",
+                default: []
             },
             voiceBasePath: {
                 type: "string",
@@ -455,7 +479,8 @@ export const napcatPlugin = {
                 description: "Token for authenticating with NapCat HTTP server (Bearer token)",
                 default: ""
             }
-        }
+            }
+        },
     },
     config: {
         listAccountIds: () => ["default"],
@@ -634,7 +659,7 @@ export const napcatPlugin = {
             if (targetType === "group") payload.group_id = targetId;
             else payload.user_id = targetId;
 
-            console.log(`[NapCat] Sending media to ${targetType} ${targetId}: ${message}`);
+            console.log(`[NapCat] Sending media to ${targetType} ${targetId}: ${redactNapCatMediaForLog(message)}`);
 
             const deliveryKey = `${endpoint}\u0000${targetId}\u0000${message}`;
             const result = await sendTextToNapCatOnce(
@@ -656,4 +681,4 @@ export const napcatPlugin = {
             });
         }
     }
-};
+} satisfies ChannelPlugin;

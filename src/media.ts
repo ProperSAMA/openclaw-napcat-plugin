@@ -29,17 +29,32 @@ export function resolveLocalFilePath(mediaUrl: string): string | null {
 
 export function buildMediaProxyUrl(mediaUrl: string, config: any): string {
     const enabled = config.mediaProxyEnabled === true;
-    const baseUrl = String(config.publicBaseUrl || "").trim().replace(/\/+$/, "");
+    const baseUrl = String(config.publicBaseUrl || "").trim();
     if (!enabled || !baseUrl) return mediaUrl;
 
     const token = String(config.mediaProxyToken || "").trim();
-    const query = new URLSearchParams({ url: mediaUrl });
-    if (token) query.set("token", token);
-    return `${baseUrl}/napcat/media?${query.toString()}`;
+    if (!token) throw new Error("NapCat media proxy is enabled but mediaProxyToken is not configured");
+
+    const publicUrl = new URL(baseUrl);
+    if ((publicUrl.protocol !== "http:" && publicUrl.protocol !== "https:")
+        || publicUrl.username
+        || publicUrl.password
+        || publicUrl.search
+        || publicUrl.hash) {
+        throw new Error("NapCat publicBaseUrl must be an HTTP(S) URL without credentials, query, or fragment");
+    }
+    publicUrl.pathname = `${publicUrl.pathname.replace(/\/+$/, "")}/napcat/media`;
+    publicUrl.searchParams.set("url", mediaUrl);
+    publicUrl.searchParams.set("token", token);
+    return publicUrl.toString();
 }
 
 export function isAudioMedia(mediaUrl: string): boolean {
     return /\.(wav|mp3|amr|silk|ogg|m4a|flac|aac)(?:\?.*)?$/i.test(mediaUrl);
+}
+
+export function redactNapCatMediaForLog(message: string): string {
+    return message.replace(/(\[CQ:(?:image|record),[^\]]*?file=)[^,\]]+/gi, "$1<redacted>");
 }
 
 function isImageMedia(mediaUrl: string): boolean {
@@ -121,7 +136,7 @@ export async function resolveNapCatMediaFileValue(
             const inlineImage = await tryBuildInlineImage(resolvedUrl);
             if (inlineImage) return inlineImage;
         } catch (error: any) {
-            console.warn(`[NapCat] Failed to inline image media ${resolvedUrl}: ${error?.message || error}`);
+            console.warn(`[NapCat] Failed to inline image media: ${error?.message || error}`);
         }
     }
 

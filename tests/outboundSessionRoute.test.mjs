@@ -41,8 +41,9 @@ test("resolveOutboundSessionRoute builds canonical private session keys", () => 
     target: "session:napcat:private:123456",
   });
   assert.deepEqual(route, {
-    sessionKey: "agent:main:session:napcat:private:123456",
-    baseSessionKey: "agent:main:session:napcat:private:123456",
+    sessionKey: "agent:main:main",
+    baseSessionKey: "agent:main:main",
+    recipientSessionExact: true,
     peer: { kind: "direct", id: "123456" },
     chatType: "direct",
     from: "napcat:private:123456",
@@ -56,8 +57,9 @@ test("resolveOutboundSessionRoute builds canonical group session keys", () => {
     agentId: "main",
     target: "napcat:session:napcat:group:987654",
   });
-  assert.equal(route.sessionKey, "agent:main:session:napcat:group:987654");
-  assert.equal(route.baseSessionKey, "agent:main:session:napcat:group:987654");
+  assert.equal(route.sessionKey, "agent:main:napcat:group:987654");
+  assert.equal(route.baseSessionKey, "agent:main:napcat:group:987654");
+  assert.equal(route.recipientSessionExact, true);
   assert.deepEqual(route.peer, { kind: "group", id: "987654" });
   assert.equal(route.chatType, "group");
   assert.equal(route.from, "napcat:group:987654");
@@ -70,7 +72,7 @@ test("resolveOutboundSessionRoute accepts short private/group targets without th
     agentId: "main",
     target: "private:123456",
   });
-  assert.equal(direct.sessionKey, "agent:main:session:napcat:private:123456");
+  assert.equal(direct.sessionKey, "agent:main:main");
   assert.equal(direct.chatType, "direct");
 
   const group = messaging.resolveOutboundSessionRoute({
@@ -78,7 +80,7 @@ test("resolveOutboundSessionRoute accepts short private/group targets without th
     agentId: "main",
     target: "group:987654",
   });
-  assert.equal(group.sessionKey, "agent:main:session:napcat:group:987654");
+  assert.equal(group.sessionKey, "agent:main:napcat:group:987654");
   assert.equal(group.chatType, "group");
 });
 
@@ -88,7 +90,20 @@ test("resolveOutboundSessionRoute normalizes the agent id like the inbound webho
     agentId: " Main ",
     target: "private:123456",
   });
-  assert.equal(route.sessionKey, "agent:main:session:napcat:private:123456");
+  assert.equal(route.sessionKey, "agent:main:main");
+});
+
+test("resolveOutboundSessionRoute honors OpenClaw direct-message scope", () => {
+  const route = messaging.resolveOutboundSessionRoute({
+    cfg: { session: { dmScope: "per-peer" } },
+    agentId: "main",
+    accountId: "default",
+    target: "private:123456",
+  });
+
+  assert.equal(route.sessionKey, "agent:main:direct:123456");
+  assert.equal(route.baseSessionKey, route.sessionKey);
+  assert.equal(route.recipientSessionExact, true);
 });
 
 test("resolveOutboundSessionRoute returns null for bare QQ numbers so the core fallback handles them", () => {
