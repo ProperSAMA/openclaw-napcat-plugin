@@ -1,7 +1,7 @@
 {
   "id": "napcat",
   "name": "NapCat QQ",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "QQ chat channel plugin for OpenClaw via NapCat (OneBot 11)",
   "author": "ProperSAMA",
   "channels": ["napcat"],
@@ -158,6 +158,12 @@
             "title": "Inbound Log Directory",
             "description": "Directory to store per-user/per-group inbound logs",
             "default": "./logs/napcat-inbound"
+          },
+          "webhookSecret": {
+            "type": "string",
+            "title": "Webhook Signing Secret",
+            "description": "Required inbound HMAC secret; must match the NapCat HTTP client token",
+            "default": ""
           },
           "token": {
             "type": "string",

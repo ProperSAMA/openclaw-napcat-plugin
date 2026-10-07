@@ -119,3 +119,40 @@ test("a lost response is never resent, even for a quoted reply", async () => {
     assert.equal(requests.length, 1);
   });
 });
+
+test('a partial response rejects without retrying a message send', { timeout: 2000 }, async () => {
+  await withServer((req, res) => {
+    res.writeHead(200, { 'Content-Length': '100' });
+    res.write('{');
+    setTimeout(() => res.destroy(), 20);
+  }, async ({ baseUrl, requests }) => {
+    await assert.rejects(sendToNapCat(baseUrl + '/send_group_msg', {}, undefined, { allowRetry: false, timeoutMs: 500 }), /interrupted|aborted/);
+    assert.equal(requests.length, 1);
+  });
+});
+
+test('an overall deadline bounds a response that never becomes idle', { timeout: 2000 }, async () => {
+  await withServer((req, res) => {
+    res.writeHead(200);
+    const timer = setInterval(() => res.write(' '), 10);
+    res.once('close', () => clearInterval(timer));
+  }, async ({ baseUrl, requests }) => {
+    await assert.rejects(sendToNapCat(baseUrl + '/send_group_msg', {}, undefined, { allowRetry: false, timeoutMs: 100 }), /timeout/);
+    assert.equal(requests.length, 1);
+  });
+});
+
+test('oversized API responses are rejected during streaming', async () => {
+  await withServer((req, res) => res.end(Buffer.alloc(8 * 1024 * 1024 + 1)), async ({ baseUrl }) => {
+    await assert.rejects(sendToNapCat(baseUrl + '/read', {}, undefined, { allowRetry: false }), /size limit/);
+  });
+});
+
+test('invalid success responses never fabricate delivery receipts or trigger retries', async () => {
+  for (const response of ['', '<html>wrong upstream</html>', 'null', '[]', '{}', '{"retcode":0}', '{"status":"ok","data":{}}']) {
+    await withServer((req, res) => res.end(response), async ({ baseUrl, requests }) => {
+      await assert.rejects(sendNapCatMessage(baseUrl + '/send_group_msg', { message: '[CQ:reply,id=123] x' }), /unknown/);
+      assert.equal(requests.length, 1);
+    });
+  }
+});

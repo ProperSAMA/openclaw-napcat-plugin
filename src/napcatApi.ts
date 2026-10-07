@@ -3,10 +3,12 @@
 // carry separate senders with different result handling -- the adapter checked only the HTTP
 // status, so an HTTP 200 carrying {"status":"failed"} was reported back to OpenClaw as a
 // successful delivery. Keeping one implementation is what makes the two paths agree.
-import { Agent as HttpAgent, request as httpRequest } from "node:http";
+import { Agent as HttpAgent, request as httpRequest, type IncomingMessage } from "node:http";
 import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
 
 import { getNapCatConfig } from "./runtime.js";
+
+export const NAPCAT_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -73,6 +75,18 @@ async function postJsonWithNodeHttp(
     const agent = connectionClose ? undefined : (isHttps ? napcatHttpsAgent : napcatHttpAgent);
 
     return new Promise((resolve, reject) => {
+        let settled = false;
+        let response: IncomingMessage | undefined;
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        const finish = (error?: Error, result?: { statusCode: number; statusText: string; bodyText: string }) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(deadline);
+            req.setTimeout(0);
+            if (error) reject(error);
+            else resolve(result!);
+        };
+        const interrupted = () => finish(Object.assign(new Error("NapCat response interrupted"), { code: "ECONNRESET" }));
         const headers: Record<string, string | number> = {
             "Content-Type": "application/json",
             "Content-Length": Buffer.byteLength(body),
@@ -92,24 +106,42 @@ async function postJsonWithNodeHttp(
                 headers,
             },
             (res) => {
+                response = res;
                 const chunks: Buffer[] = [];
-                res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-                res.on("end", () => {
-                    const bodyText = Buffer.concat(chunks).toString("utf8");
-                    resolve({
-                        statusCode: res.statusCode || 0,
-                        statusText: res.statusMessage || "",
-                        bodyText,
-                    });
+                let size = 0;
+                res.on("data", (chunk) => {
+                    if (settled) return;
+                    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                    size += buffer.length;
+                    if (size > NAPCAT_RESPONSE_MAX_BYTES) {
+                        const error = new Error("NapCat response exceeds the size limit");
+                        finish(error);
+                        req.destroy(error);
+                        return;
+                    }
+                    chunks.push(buffer);
                 });
+                res.once("error", (error) => finish(error));
+                res.once("aborted", interrupted);
+                res.once("close", () => { if (!res.complete) interrupted(); });
+                res.once("end", () => finish(undefined, {
+                    statusCode: res.statusCode || 0,
+                    statusText: res.statusMessage || "",
+                    bodyText: Buffer.concat(chunks).toString("utf8"),
+                }));
             }
         );
 
-        req.setTimeout(timeoutMs, () => {
-            req.destroy(Object.assign(new Error(`NapCat request timeout after ${timeoutMs}ms`), { code: "ETIMEDOUT" }));
-        });
-
-        req.on("error", reject);
+        const timeout = () => {
+            const error = Object.assign(new Error(`NapCat request timeout after ${timeoutMs}ms`), { code: "ETIMEDOUT" });
+            finish(error);
+            req.destroy(error);
+        };
+        // Socket inactivity alone does not bound a peer that trickles response bytes.
+        deadline = setTimeout(timeout, timeoutMs);
+        req.setTimeout(timeoutMs, timeout);
+        req.once("error", (error) => finish(error));
+        req.once("close", () => { if (!response) interrupted(); });
         req.write(body);
         req.end();
     });
@@ -122,6 +154,8 @@ export type SendToNapCatOptions = {
      * HTTP response is lost, and retrying would send the same message again.
      */
     allowRetry?: boolean;
+    /** Overall deadline per attempt, including response reads. */
+    timeoutMs?: number;
 };
 
 // Call the NapCat API using node http/https. Transient retries are opt-out so
@@ -143,22 +177,25 @@ export async function sendToNapCat(
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const startedAt = Date.now();
         try {
-            const timeoutMs = timeoutsMs[Math.min(attempt - 1, timeoutsMs.length - 1)];
+            const timeoutMs = options.timeoutMs ?? timeoutsMs[Math.min(attempt - 1, timeoutsMs.length - 1)];
             const res = await postJsonWithNodeHttp(url, payload, timeoutMs, { connectionClose, token });
 
             if (res.statusCode < 200 || res.statusCode >= 300) {
                 throw new Error(`NapCat API Error: ${res.statusCode} ${res.statusText}${res.bodyText ? ` | ${res.bodyText.slice(0, 300)}` : ""}`);
             }
 
-            const elapsedMs = Date.now() - startedAt;
-            console.log(`[NapCat] sendToNapCat success attempt ${attempt}/${maxAttempts} ${targetInfo} in ${elapsedMs}ms (connection=${connectionClose ? "close" : "keep-alive"})`);
-
-            if (!res.bodyText) return { status: "ok" };
             let parsed: any;
             try {
                 parsed = JSON.parse(res.bodyText);
             } catch {
-                return { status: "ok", raw: res.bodyText };
+                throw new Error("NapCat returned an invalid JSON response; delivery outcome is unknown");
+            }
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                throw new Error("NapCat returned an invalid response envelope; delivery outcome is unknown");
+            }
+            if (!["ok", "failed"].includes(parsed.status)
+                || (parsed.retcode !== undefined && !Number.isInteger(parsed.retcode))) {
+                throw new Error("NapCat returned an invalid response envelope; delivery outcome is unknown");
             }
             if (isNapCatFailedResponse(parsed)) {
                 throw new NapCatBusinessError(`NapCat API returned failure: ${res.bodyText.slice(0, 300)}`, {
@@ -167,6 +204,12 @@ export async function sendToNapCat(
                     responseBody: res.bodyText.slice(0, 300),
                 });
             }
+            if (parsed.status !== "ok"
+                || (parsed.retcode !== undefined && parsed.retcode !== 0)) {
+                throw new Error("NapCat returned an invalid success envelope; delivery outcome is unknown");
+            }
+            const elapsedMs = Date.now() - startedAt;
+            console.log(`[NapCat] sendToNapCat success attempt ${attempt}/${maxAttempts} ${targetInfo} in ${elapsedMs}ms (connection=${connectionClose ? "close" : "keep-alive"})`);
             return parsed;
         } catch (err: any) {
             lastErr = err;
@@ -183,6 +226,14 @@ export async function sendToNapCat(
     }
 
     throw lastErr;
+}
+
+function requireMessageReceipt(result: any): any {
+    const id = result?.data?.message_id;
+    if ((typeof id !== "string" && typeof id !== "number") || !/^-?\d+$/.test(String(id))) {
+        throw new Error("NapCat returned no message receipt; delivery outcome is unknown");
+    }
+    return result;
 }
 
 export const NAPCAT_QUOTE_PREFIX_RE = /^\[CQ:reply,id=\d+\]\s*/;
@@ -202,17 +253,17 @@ export async function sendNapCatMessage(
     token?: string
 ): Promise<any> {
     try {
-        return await sendToNapCat(url, payload, token, { allowRetry: false });
+        return requireMessageReceipt(await sendToNapCat(url, payload, token, { allowRetry: false }));
     } catch (err) {
         if (!(err instanceof NapCatBusinessError)) throw err;
         const message = typeof payload?.message === "string" ? payload.message : "";
         if (!NAPCAT_QUOTE_PREFIX_RE.test(message)) throw err;
         console.warn("[NapCat] Quote-reply rejected; retrying without [CQ:reply]:", err.message);
-        return await sendToNapCat(
+        return requireMessageReceipt(await sendToNapCat(
             url,
             { ...payload, message: message.replace(NAPCAT_QUOTE_PREFIX_RE, "") },
             token,
             { allowRetry: false },
-        );
+        ));
     }
 }

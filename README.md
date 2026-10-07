@@ -69,6 +69,7 @@ openclaw plugins enable napcat
     "napcat": {
       "enabled": true,
       "url": "http://127.0.0.1:15150",
+      "webhookSecret": "替换为随机签名密钥",
       "streaming_mode": false,
       "enablePrivateTypingStatus": true,
       "enableGroupMessages": true,
@@ -103,6 +104,9 @@ openclaw gateway restart
 **B. Http 客户端**
 - Url: `http://127.0.0.1:18789/napcat`
 - 消息格式: `String`
+- Token: 与 OpenClaw 的 `channels.napcat.webhookSecret` 完全一致
+
+入站请求必须携带 NapCat 生成的 `x-signature`（原始请求体的 HMAC-SHA1）。未配置密钥返回 503，缺失或无效签名返回 403；`token` 仍仅用于出站 HTTP API。升级旧配置时必须补齐双方的签名密钥。
 
 如果 OpenClaw 和 NapCat 不在同一台机器上，把 `127.0.0.1` 改成 OpenClaw 的真实 IP。
 
@@ -121,6 +125,8 @@ openclaw gateway restart
 |---|---|---|---|
 | `enabled` | boolean | 是否启用 napcat 通道 | `false` |
 | `url` | string | NapCat 的 HTTP 服务地址 | `http://127.0.0.1:15150` |
+| `webhookSecret` | string | 必填，与 NapCat HTTP 客户端 Token 相同的入站签名密钥 | `""` |
+| `token` | string | NapCat HTTP 服务器的出站 API Bearer Token | `""` |
 | `agentId` | string | 固定把消息交给哪个 OpenClaw agent 处理；留空时按 OpenClaw 路由 | `""` |
 
 ### 权限控制
@@ -329,13 +335,14 @@ messages.queue.mode followup`）。默认的 `steer` 会把同一会话里并发
 
 ### 跨机器部署（媒体代理）
 
-如果 OpenClaw 和 NapCat 不在同一台机器上，文字能发但图片发不出去，需要开启媒体代理：
+从 1.0.13 起，图片和语音默认在 OpenClaw 侧安全加载后通过 Base64 发送，跨机器部署无需为此开启媒体代理。`/napcat/media` 仍可作为可选的受鉴权媒体读取端点；需要使用该端点时配置如下：
 
 ```json
 {
   "channels": {
     "napcat": {
       "url": "http://192.168.1.20:15150",
+      "webhookSecret": "与 NapCat HTTP 客户端 Token 一致",
       "mediaProxyEnabled": true,
       "publicBaseUrl": "http://192.168.1.10:18789",
       "mediaProxyToken": "请替换成足够长的随机令牌",
@@ -448,6 +455,7 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
       "enabled": true,
       "agentId": "main",
       "url": "http://127.0.0.1:15150",
+      "webhookSecret": "替换为随机签名密钥",
       "allowUsers": ["123456789", "987654321"],
       "enableGroupMessages": true,
       "groupWhitelist": ["123456789", "987654321"],
@@ -558,3 +566,16 @@ MIT License
 
 - [OpenClaw](https://openclaw.ai)
 - [NapCat](https://github.com/NapCatQQ/NapCat)
+
+### 出站媒体安全
+
+图片和语音在 OpenClaw 侧经过 SSRF、目录、类型和 25 MiB 大小检查后，以 Base64 发送给 NapCat；失败时不会退回未经检查的原始地址。远程媒体禁止内网地址及重定向到内网，具有读取超时。本地媒体优先遵守宿主传入的读取权限；未传入时仅允许 `mediaProxyAllowedRoots` / `voiceBasePath`。这些限制也适用于未启用媒体代理的部署。
+
+### 1.0.13 升级说明
+
+- 必须配置 `webhookSecret`，并将同一密钥填入 NapCat HTTP 客户端的 Token；这与 HTTP 服务器的出站 `token` 是两个配置项。缺失签名配置时不再接收入站事件。
+- Webhook 请求体最大 1 MiB，读取超时 10 秒。支持数组、`events` 和 `data` 形式的批量事件；逐条处理，单条处理失败不会阻止后续事件，也不会要求 NapCat 重放整批。
+- 本地图片和语音遵守宿主授权读取能力或显式允许目录；不再直接读取任意路径或将受阻地址交给 NapCat 重试。远程媒体禁止私网目标，拒绝非媒体和 SVG。
+- 回复正文中的 CQ 码按文字显示；插件生成的引用、提及和媒体控制段仍正常工作。
+- 群文件采用每次上传独立的临时目录，保留原始文件，支持同名文件并发上传。
+- NapCat API 响应最大 8 MiB，响应中断和整体超时会结束任务；非法响应或缺少消息回执表示投递结果未知，不自动重发消息。调度器能够接收真实投递失败。

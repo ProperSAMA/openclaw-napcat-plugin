@@ -1,11 +1,20 @@
+// OneBot decodes these entities after separating control segments from text.
+export function escapeNapCatCqText(text: string): string {
+    return text.replace(/&/g, "&amp;").replace(/\[/g, "&#91;").replace(/\]/g, "&#93;");
+}
+
+export function escapeNapCatCqParameter(value: string): string {
+    return escapeNapCatCqText(value).replace(/,/g, "&#44;");
+}
+
 export function isPlainTextModeEnabled(config: any): boolean {
     return config?.plainTextMode !== false;
 }
 
 export function formatNapCatOutgoingText(text: string, config: any): string {
     const raw = String(text ?? "");
-    if (!isPlainTextModeEnabled(config) || !raw) return raw;
-    return markdownToPlainText(raw);
+    const formatted = isPlainTextModeEnabled(config) ? markdownToPlainText(raw) : raw;
+    return escapeNapCatCqText(formatted);
 }
 
 function markdownToPlainText(input: string): string {
