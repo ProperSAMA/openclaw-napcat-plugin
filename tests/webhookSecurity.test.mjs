@@ -38,3 +38,28 @@ test('valid signature authenticates exact bytes before dispatch', async () => {
   assert.equal(received.length, 1);
   assert.equal(received[0].Body, '你好');
 });
+
+test('all events in supported batches are processed, including after heartbeats and filtered users', async () => {
+  for (const wrap of [events => events, events => ({ events }), events => ({ data: events })]) {
+    const received = setup();
+    const batch = [{ post_type: 'meta_event' }, { ...event, user_id: 99999 }, { ...event, message_id: 100 }, { ...event, message_id: 101 }];
+    assert.equal((await invoke(wrap(batch))).statusCode, 200);
+    assert.deepEqual(received.map(ctx => ctx.MessageSid), ['100', '101']);
+  }
+});
+
+test('a failed event does not discard subsequent events or request replay of the entire batch', async () => {
+  setup();
+  const received = [];
+  setNapCatRuntime({ config: { current: () => ({}) }, channel: {
+    routing: { resolveAgentRoute: () => ({ agentId: 'main', sessionKey: 'test', accountId: 'default' }) },
+    reply: { createReplyDispatcher: () => ({}), dispatchReplyFromConfig: async ({ ctx }) => {
+      received.push(ctx.MessageSid);
+      if (ctx.MessageSid === '100') throw Error('fixture dispatch failure');
+    } },
+  } });
+  const response = await invoke([{ ...event, message_id: 100 }, { ...event, message_id: 101 }]);
+  assert.equal(response.statusCode, 200);
+  assert.equal(JSON.parse(response.body).failedEvents, 1);
+  assert.deepEqual(received, ['100', '101']);
+});
