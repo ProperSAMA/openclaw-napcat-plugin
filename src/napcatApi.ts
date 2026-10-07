@@ -184,15 +184,18 @@ export async function sendToNapCat(
                 throw new Error(`NapCat API Error: ${res.statusCode} ${res.statusText}${res.bodyText ? ` | ${res.bodyText.slice(0, 300)}` : ""}`);
             }
 
-            const elapsedMs = Date.now() - startedAt;
-            console.log(`[NapCat] sendToNapCat success attempt ${attempt}/${maxAttempts} ${targetInfo} in ${elapsedMs}ms (connection=${connectionClose ? "close" : "keep-alive"})`);
-
-            if (!res.bodyText) return { status: "ok" };
             let parsed: any;
             try {
                 parsed = JSON.parse(res.bodyText);
             } catch {
-                return { status: "ok", raw: res.bodyText };
+                throw new Error("NapCat returned an invalid JSON response; delivery outcome is unknown");
+            }
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                throw new Error("NapCat returned an invalid response envelope; delivery outcome is unknown");
+            }
+            if (!["ok", "failed"].includes(parsed.status)
+                || (parsed.retcode !== undefined && !Number.isInteger(parsed.retcode))) {
+                throw new Error("NapCat returned an invalid response envelope; delivery outcome is unknown");
             }
             if (isNapCatFailedResponse(parsed)) {
                 throw new NapCatBusinessError(`NapCat API returned failure: ${res.bodyText.slice(0, 300)}`, {
@@ -201,6 +204,12 @@ export async function sendToNapCat(
                     responseBody: res.bodyText.slice(0, 300),
                 });
             }
+            if (parsed.status !== "ok"
+                || (parsed.retcode !== undefined && parsed.retcode !== 0)) {
+                throw new Error("NapCat returned an invalid success envelope; delivery outcome is unknown");
+            }
+            const elapsedMs = Date.now() - startedAt;
+            console.log(`[NapCat] sendToNapCat success attempt ${attempt}/${maxAttempts} ${targetInfo} in ${elapsedMs}ms (connection=${connectionClose ? "close" : "keep-alive"})`);
             return parsed;
         } catch (err: any) {
             lastErr = err;
@@ -217,6 +226,14 @@ export async function sendToNapCat(
     }
 
     throw lastErr;
+}
+
+function requireMessageReceipt(result: any): any {
+    const id = result?.data?.message_id;
+    if ((typeof id !== "string" && typeof id !== "number") || !/^-?\d+$/.test(String(id))) {
+        throw new Error("NapCat returned no message receipt; delivery outcome is unknown");
+    }
+    return result;
 }
 
 export const NAPCAT_QUOTE_PREFIX_RE = /^\[CQ:reply,id=\d+\]\s*/;
@@ -236,17 +253,17 @@ export async function sendNapCatMessage(
     token?: string
 ): Promise<any> {
     try {
-        return await sendToNapCat(url, payload, token, { allowRetry: false });
+        return requireMessageReceipt(await sendToNapCat(url, payload, token, { allowRetry: false }));
     } catch (err) {
         if (!(err instanceof NapCatBusinessError)) throw err;
         const message = typeof payload?.message === "string" ? payload.message : "";
         if (!NAPCAT_QUOTE_PREFIX_RE.test(message)) throw err;
         console.warn("[NapCat] Quote-reply rejected; retrying without [CQ:reply]:", err.message);
-        return await sendToNapCat(
+        return requireMessageReceipt(await sendToNapCat(
             url,
             { ...payload, message: message.replace(NAPCAT_QUOTE_PREFIX_RE, "") },
             token,
             { allowRetry: false },
-        );
+        ));
     }
 }

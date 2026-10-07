@@ -147,3 +147,12 @@ test('oversized API responses are rejected during streaming', async () => {
     await assert.rejects(sendToNapCat(baseUrl + '/read', {}, undefined, { allowRetry: false }), /size limit/);
   });
 });
+
+test('invalid success responses never fabricate delivery receipts or trigger retries', async () => {
+  for (const response of ['', '<html>wrong upstream</html>', 'null', '[]', '{}', '{"retcode":0}', '{"status":"ok","data":{}}']) {
+    await withServer((req, res) => res.end(response), async ({ baseUrl, requests }) => {
+      await assert.rejects(sendNapCatMessage(baseUrl + '/send_group_msg', { message: '[CQ:reply,id=123] x' }), /unknown/);
+      assert.equal(requests.length, 1);
+    });
+  }
+});
