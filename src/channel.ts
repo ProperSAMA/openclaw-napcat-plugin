@@ -1,6 +1,6 @@
 // Minimal NapCat Channel Implementation
 import path from "node:path";
-import { access, copyFile, mkdir, unlink } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-contract";
 import type { ChannelMessagingAdapter, ChannelPlugin } from "openclaw/plugin-sdk/core";
 import { buildAgentSessionKey } from "openclaw/plugin-sdk/routing";
@@ -153,16 +153,24 @@ function getContainerVisiblePath(localPath: string, config: any): string | null 
     return `${containerPrefix}/${relative}`;
 }
 
-async function stageFileForNapCat(localPath: string, config: any): Promise<string | null> {
+async function stageFileForNapCat(localPath: string, config: any): Promise<{ hostDirectory: string; containerPath: string } | null> {
     const hostStageDir = String(config.groupFileStageHostDir || "").trim();
     const containerStageDir = String(config.groupFileStageContainerDir || "").trim();
     if (!hostStageDir || !containerStageDir) return null;
 
     const fileName = path.basename(localPath);
-    const stagedHostPath = path.join(hostStageDir, fileName);
     await mkdir(hostStageDir, { recursive: true });
-    await copyFile(localPath, stagedHostPath);
-    return `${containerStageDir.replace(/\/+$/, "")}/${fileName}`;
+    const hostDirectory = await mkdtemp(path.join(hostStageDir, "napcat-upload-"));
+    try {
+        await copyFile(localPath, path.join(hostDirectory, fileName));
+        return {
+            hostDirectory,
+            containerPath: `${containerStageDir.replace(/\/+$/, "")}/${path.basename(hostDirectory)}/${fileName}`,
+        };
+    } catch (error) {
+        await rm(hostDirectory, { recursive: true, force: true });
+        throw error;
+    }
 }
 
 function isNapCatGroupFileCandidate(mediaUrl: string): boolean {
@@ -615,7 +623,7 @@ export const napcatPlugin = {
                 isNapCatGroupFileCandidate(mediaUrl);
 
             if (isGroupFile) {
-                let stagedPath: string | null = null;
+                let stagedFile: Awaited<ReturnType<typeof stageFileForNapCat>> = null;
                 try {
                     const localFilePath = resolveLocalFilePath(mediaUrl!);
                     if (!localFilePath) {
@@ -626,10 +634,10 @@ export const napcatPlugin = {
                     const folder = String(config.groupFileFolder || "").trim();
 
                     const mappedPath = getContainerVisiblePath(localFilePath, config);
-                    stagedPath = mappedPath ? null : await stageFileForNapCat(localFilePath, config);
-                    const uploadFilePath = mappedPath || stagedPath || localFilePath;
+                    stagedFile = mappedPath ? null : await stageFileForNapCat(localFilePath, config);
+                    const uploadFilePath = mappedPath || stagedFile?.containerPath || localFilePath;
 
-                    if (uploadFilePath === localFilePath && !mappedPath && !stagedPath) {
+                    if (uploadFilePath === localFilePath && !mappedPath && !stagedFile) {
                         throw new Error("Group file path is not container-visible. Configure groupFileHostPrefix/groupFileContainerPrefix or groupFileStageHostDir/groupFileStageContainerDir.");
                     }
 
@@ -668,18 +676,11 @@ export const napcatPlugin = {
                 } catch (err: any) {
                     throw err;
                 } finally {
-                    if (stagedPath) {
+                    if (stagedFile) {
                         try {
-                            const hostStageDir = String(config.groupFileStageHostDir || "").trim().replace(/\/+$/, "");
-                            const containerStageDir = String(config.groupFileStageContainerDir || "").trim().replace(/\/+$/, "");
-                            if (hostStageDir && containerStageDir && stagedPath.startsWith(`${containerStageDir}/`)) {
-                                const relative = stagedPath.slice(containerStageDir.length).replace(/^\/+/, "");
-                                const stagedHostPath = path.join(hostStageDir, relative);
-                                await unlink(stagedHostPath);
-                                console.log(`[NapCat] Cleaned staged file: ${stagedHostPath}`);
-                            }
+                            await rm(stagedFile.hostDirectory, { recursive: true, force: true });
                         } catch (cleanupErr: any) {
-                            console.warn(`[NapCat] Failed to cleanup staged file ${stagedPath}: ${cleanupErr?.message || cleanupErr}`);
+                            console.warn(`[NapCat] Failed to cleanup staged directory: ${cleanupErr?.message || cleanupErr}`);
                         }
                     }
                 }
