@@ -1,3 +1,4 @@
+import { escapeNapCatCqParameter } from "./plainText.js";
 import path from "node:path";
 import { loadMediaProxyResource, type OutboundMediaAccess } from "./mediaProxy.js";
 import { fileURLToPath } from "node:url";
@@ -92,5 +93,5 @@ export async function buildNapCatMediaCq(
     const shouldUseVoice = forceVoice || isAudioMedia(mediaUrl);
     const fileValue = await resolveNapCatMediaFileValue(mediaUrl, config, { forceVoice, mediaAccess });
     const type = shouldUseVoice ? "record" : "image";
-    return `[CQ:${type},file=${fileValue}]`;
+    return `[CQ:${type},file=${escapeNapCatCqParameter(fileValue)}]`;
 }

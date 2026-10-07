@@ -93,3 +93,14 @@ test("an empty reply stays empty even when a quote id is supplied", async () => 
 
   assert.equal(message, "");
 });
+
+test('untrusted CQ text is escaped even when Markdown conversion is disabled', async () => {
+  for (const plainTextMode of [true, false]) {
+    const message = await buildNapCatMessageFromReply(
+      { text: '[CQ:at,qq=all] & &#91;CQ:image,file=x&#93;' },
+      { plainTextMode }, '12345', '67890',
+    );
+    assert.equal(message, '[CQ:reply,id=67890] &#91;CQ:at,qq=all&#93; &amp; &amp;#91;CQ:image,file=x&amp;#93;');
+    assert.equal(message.match(/\[CQ:/g).length, 1);
+  }
+});
