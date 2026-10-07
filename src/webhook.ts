@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -252,35 +253,36 @@ export async function handleNapCatMediaProxy(req: IncomingMessage, res: ServerRe
     return handleMediaProxyRequest(res, req.url || "");
 }
 
-async function readBody(req: IncomingMessage): Promise<any> {
-    return new Promise((resolve, reject) => {
-        let data = "";
-        req.on("data", chunk => data += chunk);
-        req.on("end", () => {
-            try {
-                if (!data) {
-                    resolve({});
-                    return;
-                }
-                resolve(JSON.parse(data));
-            } catch (e) {
-                console.error("NapCat JSON Parse Error:", e);
-                // Some deployments send form-urlencoded bodies with nested JSON payload.
-                try {
-                    const params = new URLSearchParams(data);
-                    const wrapped = params.get("payload") || params.get("data") || params.get("message");
-                    if (wrapped) {
-                        resolve(JSON.parse(wrapped));
-                        return;
-                    }
-                } catch {
-                    // Fall through and preserve raw body for diagnostics.
-                }
-                resolve({ __raw: data, __parseError: true });
-            }
-        });
-        req.on("error", reject);
-    });
+async function readBody(req: IncomingMessage): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+}
+
+function parseBody(raw: Buffer): any {
+    const data = raw.toString("utf8");
+    if (!data) return {};
+    try {
+        return JSON.parse(data);
+    } catch {
+        // Legacy form payloads are accepted only after authenticating their original bytes.
+        try {
+            const params = new URLSearchParams(data);
+            const wrapped = params.get("payload") || params.get("data") || params.get("message");
+            if (wrapped) return JSON.parse(wrapped);
+        } catch { /* Report the malformed body below. */ }
+        return { __raw: data, __parseError: true };
+    }
+}
+
+function hasValidWebhookSignature(req: IncomingMessage, raw: Buffer, secret: string): boolean {
+    const signature = req.headers["x-signature"];
+    if (typeof signature !== "string" || !/^sha1=[0-9a-f]{40}$/i.test(signature)) return false;
+    const expected = createHmac("sha1", secret).update(raw).digest();
+    const supplied = Buffer.from(signature.slice(5), "hex");
+    return timingSafeEqual(expected, supplied);
 }
 
 function sanitizeLogToken(raw: string): string {
@@ -570,12 +572,20 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
     }
 
     try {
-        const body = await readBody(req);
         const baseConfig = getNapCatConfig();
-
-        // Note: Token verification for incoming requests from NapCat is not implemented
-        // because NapCat's HTTP client does not support custom Authorization headers.
-        // The token is only used when OpenClaw sends messages TO NapCat.
+        const webhookSecret = String(baseConfig.webhookSecret || "").trim();
+        if (!webhookSecret) {
+            res.statusCode = 503;
+            res.end("webhook authentication is not configured");
+            return true;
+        }
+        const rawBody = await readBody(req);
+        if (!hasValidWebhookSignature(req, rawBody, webhookSecret)) {
+            res.statusCode = 403;
+            res.end("forbidden");
+            return true;
+        }
+        const body = parseBody(rawBody);
 
         const events = extractNapCatEvents(body);
 

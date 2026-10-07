@@ -501,6 +501,12 @@ export const napcatPlugin = {
                 description: "Directory to store per-user/per-group inbound logs",
                 default: "./logs/napcat-inbound"
             },
+            webhookSecret: {
+                type: "string",
+                title: "Webhook Signing Secret",
+                description: "Required inbound HMAC secret; must match the NapCat HTTP client token",
+                default: ""
+            },
             token: {
                 type: "string",
                 title: "HTTP API Token",

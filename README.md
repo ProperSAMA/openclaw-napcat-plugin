@@ -69,6 +69,7 @@ openclaw plugins enable napcat
     "napcat": {
       "enabled": true,
       "url": "http://127.0.0.1:15150",
+      "webhookSecret": "替换为随机签名密钥",
       "streaming_mode": false,
       "enablePrivateTypingStatus": true,
       "enableGroupMessages": true,
@@ -103,6 +104,9 @@ openclaw gateway restart
 **B. Http 客户端**
 - Url: `http://127.0.0.1:18789/napcat`
 - 消息格式: `String`
+- Token: 与 OpenClaw 的 `channels.napcat.webhookSecret` 完全一致
+
+入站请求必须携带 NapCat 生成的 `x-signature`（原始请求体的 HMAC-SHA1）。未配置密钥返回 503，缺失或无效签名返回 403；`token` 仍仅用于出站 HTTP API。升级旧配置时必须补齐双方的签名密钥。
 
 如果 OpenClaw 和 NapCat 不在同一台机器上，把 `127.0.0.1` 改成 OpenClaw 的真实 IP。
 
@@ -448,6 +452,7 @@ node skill/napcat-qq/scripts/qq-contact-search.js 老王 private
       "enabled": true,
       "agentId": "main",
       "url": "http://127.0.0.1:15150",
+      "webhookSecret": "替换为随机签名密钥",
       "allowUsers": ["123456789", "987654321"],
       "enableGroupMessages": true,
       "groupWhitelist": ["123456789", "987654321"],
