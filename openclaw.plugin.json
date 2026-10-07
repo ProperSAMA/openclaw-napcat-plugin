@@ -56,6 +56,18 @@
             "description": "Send assistant intermediate progress (commentary) messages to QQ as well, throttled to 1 per 3s per conversation",
             "default": false
           },
+          "groupReplyQuote": {
+            "type": "boolean",
+            "title": "Quote Reply in Groups",
+            "description": "In group chats, reply by quoting the triggering message ([CQ:reply]) instead of @-mentioning the sender. Off by default; overridable per conversation",
+            "default": false
+          },
+          "conversationConfigDir": {
+            "type": "string",
+            "title": "Per-Conversation Config Directory",
+            "description": "Directory of per-conversation JSON overrides (default.json plus <group|private>-<id>.json). A missing directory disables the feature",
+            "default": "~/.openclaw/napcat/conversations"
+          },
           "plainTextMode": {
             "type": "boolean",
             "title": "Plain Text Mode",

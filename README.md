@@ -140,6 +140,23 @@ openclaw gateway restart
 | `plainTextMode` | boolean | 是否把发往 QQ 的 Markdown 风格文字转成纯文本 | `true` |
 | `enablePrivateTypingStatus` | boolean | 是否在私聊处理中显示 QQ "正在输入" | `true` |
 | `enable_progress_messages` | boolean | 是否将 OpenClaw 的 commentary 进度消息投递到 QQ | `false` |
+| `groupReplyQuote` | boolean | 群聊回复改用引用触发消息（`[CQ:reply]`），而不是 @ 发送者 | `false` |
+| `conversationConfigDir` | string | 分会话配置目录（`default.json` 加 `<group\|private>-<id>.json`）；目录不存在则该特性静默不生效 | `~/.openclaw/napcat/conversations` |
+
+**重要前提**：`groupReplyQuote` 依赖 `messages.queue.mode = "followup"`（`openclaw config set
+messages.queue.mode followup`）。默认的 `steer` 会把同一会话里并发到达的消息折进正在跑的那一轮，
+两条消息的回复就会带上同一条消息的 id，表现是「连发两条，都引用第一条」。
+
+### 分会话配置
+
+`conversationConfigDir` 下的 JSON 可以按会话覆盖行为类配置项，优先级由低到高：
+`channels.napcat` → `default.json` → `<group|private>-<id>.json`（会话 id 里的 `:` 换成 `-`）。
+目录不存在时该特性静默不生效；文件改完存盘即生效，不需要重启。
+
+连接类键（`url`、`token`、`mediaProxy*` 等）不在覆盖范围内，写了会被忽略并打 warning。
+
+可覆盖的键：`groupReplyQuote`、`streaming_mode`、`enable_progress_messages`、
+`plainTextMode`、`groupMentionOnly`、`enablePrivateTypingStatus`、`agentId`。
 
 ### 媒体代理（跨机器部署）
 
