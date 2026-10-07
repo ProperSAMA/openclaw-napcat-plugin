@@ -888,11 +888,9 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         else msgPayload.user_id = targetId;
                         
                         console.log(`[NapCat] Sending reply to ${isGroup ? 'group' : 'private'} ${targetId}: ${redactNapCatMediaForLog(message).substring(0, 50)}...`);
-                        try {
-                            await sendNapCatMessage(`${baseUrl}${endpoint}`, msgPayload, token);
-                        } catch (err) {
-                            console.error("[NapCat] Reply delivery failed (suppressed to avoid channel crash):", err);
-                        }
+                        // Let the dispatcher record delivery failure. Webhook acknowledgement
+                        // is handled separately and must not turn failure into success here.
+                        await sendNapCatMessage(`${baseUrl}${endpoint}`, msgPayload, token);
                     },
                     onError: (err, info) => {
                         typingController.stop();
@@ -945,11 +943,9 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
                         else msgPayload.user_id = targetId;
                         
                         console.log(`[NapCat] Sending reply to ${isGroup ? 'group' : 'private'} ${targetId}: ${redactNapCatMediaForLog(message).substring(0, 50)}...`);
-                        try {
-                            await sendNapCatMessage(`${baseUrl}${endpoint}`, msgPayload, token);
-                        } catch (err) {
-                            console.error("[NapCat] Reply delivery failed (suppressed to avoid channel crash):", err);
-                        }
+                        // Let the dispatcher record delivery failure. Webhook acknowledgement
+                        // is handled separately and must not turn failure into success here.
+                        await sendNapCatMessage(`${baseUrl}${endpoint}`, msgPayload, token);
                     },
                     onError: (err, info) => {
                         typingController.stop();
