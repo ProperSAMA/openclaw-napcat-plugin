@@ -1,3 +1,4 @@
+import { readWebhookBody, WebhookBodyError } from "./webhookBody.js";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { appendFile, mkdir } from "node:fs/promises";
@@ -251,14 +252,6 @@ export async function handleNapCatMediaProxy(req: IncomingMessage, res: ServerRe
         return true;
     }
     return handleMediaProxyRequest(res, req.url || "");
-}
-
-async function readBody(req: IncomingMessage): Promise<Buffer> {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks);
 }
 
 function parseBody(raw: Buffer): any {
@@ -539,7 +532,8 @@ async function logInboundParseFailure(rawBody: string, config: any): Promise<voi
     const line = JSON.stringify({
         ts: new Date().toISOString(),
         kind: "parse_error",
-        raw_body: rawBody,
+        raw_body: rawBody.slice(0, 2048),
+        truncated: rawBody.length > 2048,
     }) + "\n";
     await mkdir(dirname(filePath), { recursive: true });
     await appendFile(filePath, line, "utf8");
@@ -579,7 +573,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
             res.end("webhook authentication is not configured");
             return true;
         }
-        const rawBody = await readBody(req);
+        const rawBody = await readWebhookBody(req);
         if (!hasValidWebhookSignature(req, rawBody, webhookSecret)) {
             res.statusCode = 403;
             res.end("forbidden");
@@ -1036,6 +1030,12 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
         res.end('{"status":"ok"}');
         return true;
     } catch (err) {
+        if (err instanceof WebhookBodyError) {
+            res.statusCode = err.statusCode;
+            res.setHeader("Connection", "close");
+            res.end(err.message);
+            return true;
+        }
         console.error("NapCat Webhook Error:", err);
         res.statusCode = 500;
         res.end("error");
