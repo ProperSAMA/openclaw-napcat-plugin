@@ -563,3 +563,7 @@ MIT License
 
 - [OpenClaw](https://openclaw.ai)
 - [NapCat](https://github.com/NapCatQQ/NapCat)
+
+### 出站媒体安全
+
+图片和语音在 OpenClaw 侧经过 SSRF、目录、类型和 25 MiB 大小检查后，以 Base64 发送给 NapCat；失败时不会退回未经检查的原始地址。远程媒体禁止内网地址及重定向到内网，具有读取超时。本地媒体优先遵守宿主传入的读取权限；未传入时仅允许 `mediaProxyAllowedRoots` / `voiceBasePath`。这些限制也适用于未启用媒体代理的部署。

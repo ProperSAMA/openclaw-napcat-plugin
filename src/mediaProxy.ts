@@ -28,6 +28,12 @@ export type MediaProxyResource = {
 type GuardedFetch = typeof fetchWithSsrFGuard;
 type LocalFileReader = typeof readLocalFileFromRoots;
 
+export type OutboundMediaAccess = {
+    localRoots?: readonly string[];
+    readFile?: (filePath: string) => Promise<Buffer>;
+    workspaceDir?: string;
+};
+
 export type MediaProxyDependencies = {
     guardedFetch?: GuardedFetch;
     readLocalFile?: LocalFileReader;
@@ -122,6 +128,7 @@ async function loadLocalMedia(
     mediaUrl: string,
     config: any,
     dependencies: MediaProxyDependencies,
+    access?: OutboundMediaAccess,
 ): Promise<MediaProxyResource> {
     let filePath: string;
     try {
@@ -132,7 +139,15 @@ async function loadLocalMedia(
     if (!isAbsolute(filePath)) {
         throw new MediaProxyError("local media path must be absolute", 400, "INVALID_URL");
     }
-    const roots = allowedLocalRoots(config);
+    // A host reader is an authorization capability, not an unrestricted fs reader.
+    if (access?.readFile) {
+        const buffer = await access.readFile(filePath);
+        if (buffer.length > MEDIA_PROXY_MAX_BYTES) {
+            throw new MediaProxyError("local media exceeds the size limit", 413, "TOO_LARGE");
+        }
+        return { buffer, contentType: await validateMedia(buffer) };
+    }
+    const roots = access?.localRoots !== undefined ? [...access.localRoots] : allowedLocalRoots(config);
     if (roots.length === 0) {
         throw new MediaProxyError("no local media roots are configured", 503, "ROOTS_NOT_CONFIGURED");
     }
@@ -170,7 +185,8 @@ export async function loadMediaProxyResource(
     mediaUrl: string,
     config: any,
     dependencies: MediaProxyDependencies = {},
+    access?: OutboundMediaAccess,
 ): Promise<MediaProxyResource> {
     if (/^https?:\/\//i.test(mediaUrl)) return loadRemoteMedia(mediaUrl, dependencies);
-    return loadLocalMedia(mediaUrl, config, dependencies);
+    return loadLocalMedia(mediaUrl, config, dependencies, access);
 }

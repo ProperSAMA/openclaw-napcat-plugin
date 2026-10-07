@@ -585,7 +585,7 @@ export const napcatPlugin = {
             );
             return toOutboundDeliveryResult(result, targetId);
         },
-        sendMedia: async ({ to, text, mediaUrl, cfg, replyToId }: any) => {
+        sendMedia: async ({ to, text, mediaUrl, cfg, replyToId, audioAsVoice, mediaAccess, mediaLocalRoots, mediaReadFile }: any) => {
             const config = cfg.channels?.napcat || {};
             const baseUrl = config.url || "http://127.0.0.1:15150";
             const token = String(config.token || "").trim();
@@ -687,7 +687,7 @@ export const napcatPlugin = {
 
             // Basic media support: try CQ image/record format.
             const mediaMessage = mediaUrl
-                ? await buildNapCatMediaCq(mediaUrl, config)
+                ? await buildNapCatMediaCq(mediaUrl, config, audioAsVoice === true, mediaAccess ?? { localRoots: mediaLocalRoots, readFile: mediaReadFile })
                 : "";
             const convConfig = resolveNapCatConversationConfig(config, `${targetType}:${targetId}`);
             const plainText = formatNapCatOutgoingText(text || "", convConfig);
