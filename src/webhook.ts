@@ -291,7 +291,7 @@ function extractNapCatMessageSegments(input: any): any[] {
         return [input];
     }
     if (typeof input === "string") {
-        return [{ type: "text", data: { text: input } }];
+        return [{ type: "text", data: { text: redactInboundMediaText(input) } }];
     }
     return [];
 }
@@ -402,7 +402,7 @@ async function renderNapCatForwardNode(
     } else if (typeof rawNode?.message === "string") {
         contentText = normalizeRenderedMessageText(rawNode.message);
     } else if (typeof rawNode?.raw_message === "string") {
-        contentText = normalizeRenderedMessageText(rawNode.raw_message);
+        contentText = normalizeRenderedMessageText(redactInboundMediaText(rawNode.raw_message));
     }
 
     return `${senderName}: ${contentText || "[空消息]"}`;
@@ -485,12 +485,12 @@ async function renderNapCatSegmentToText(
 async function buildInboundMessageText(event: any, config: any): Promise<string> {
     const segments = extractNapCatMessageSegments(event?.message);
     if (segments.length === 0) {
-        return normalizeRenderedMessageText(String(event?.raw_message || ""));
+        return normalizeRenderedMessageText(redactInboundMediaText(String(event?.raw_message || "")));
     }
 
     const cache = new Map<string, any[] | null>();
     const rendered = await renderNapCatSegmentsToText(segments, config, cache);
-    return rendered || normalizeRenderedMessageText(String(event?.raw_message || ""));
+    return rendered || normalizeRenderedMessageText(redactInboundMediaText(String(event?.raw_message || "")));
 }
 
 function getInboundLogFilePath(body: any, config: any): string {
@@ -576,7 +576,7 @@ async function processNapCatEvent(event: any, baseConfig: any, stageImages = sta
             console.warn(`[NapCat] WARNING: user_id is not numeric: ${senderId}`);
         }
         const rawText = redactInboundMediaText(String(event.raw_message || ""));
-        let text = redactInboundMediaText(await buildInboundMessageText(event, config));
+        let text = await buildInboundMessageText(event, config);
 
         // Get allowUsers from config
         const allowUsers = config.allowUsers || [];

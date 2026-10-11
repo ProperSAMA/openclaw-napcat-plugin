@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { access } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { buildAgentMediaPayload, detectMime, fetchRemoteMedia, saveMediaBuffer } from 'openclaw/plugin-sdk/media-runtime';
 
 export const INBOUND_IMAGE_LIMITS = { count: 8, bytes: 10 * 1024 * 1024, timeoutMs: 10_000, concurrency: 4, cacheEntries: 256, cacheTtlMs: 5 * 60_000 };
@@ -10,7 +12,7 @@ export function decodeCqParameter(value: string): string {
 export function extractInboundImageUrls(event: any): string[] {
     const segments = Array.isArray(event.message) ? event.message : event.message && typeof event.message === 'object' ? [event.message] : [];
     const images = segments.filter((s: any) => s?.type === 'image' || s?.type === 'mface');
-    if (images.length) return images.map((s: any) => String(s.data?.url || s.data?.file || '').trim());
+    if (Array.isArray(event.message) || segments.length) return images.map((s: any) => String(s.data?.url || s.data?.file || '').trim());
     const raw = typeof event.message === 'string' ? event.message : String(event.raw_message || '');
     return [...raw.matchAll(/\[CQ:(?:image|mface),([^\]]*)\]/g)].map(match => {
         const params = Object.fromEntries(match[1].split(',').map(part => { const i = part.indexOf('='); return [part.slice(0, i), decodeCqParameter(part.slice(i + 1))]; }));
@@ -31,12 +33,23 @@ type Result = { media: { path: string; contentType: string }[]; failures: string
 export type InboundImageStager = (event: any) => Promise<{ payload: ReturnType<typeof buildAgentMediaPayload>; failures: string[] }>;
 export function createInboundImageStager(deps: Dependencies = { fetch: fetchRemoteMedia, save: saveMediaBuffer }): InboundImageStager {
     let active = 0;
-    const cache = new Map<string, { expires: number; promise: Promise<Result> }>();
-    async function stage(urls: string[]): Promise<Result> {
+    // In-flight event sharing is separate from the bounded, successful-attachment cache.
+    const inflight = new Map<string, Promise<Result>>();
+    const cache = new Map<string, { expires: number; media: Result['media'][number] }>();
+    async function stage(urls: string[], eventKey?: string): Promise<Result> {
         const result: Result = { media: [], failures: [] };
         if (urls.length > INBOUND_IMAGE_LIMITS.count) result.failures.push('image_count_limit');
         // Sequential per event preserves order; cross-event slots fail fast, never queue.
         for (const [index, source] of urls.slice(0, INBOUND_IMAGE_LIMITS.count).entries()) {
+            const cacheKey = eventKey ? eventKey + ':' + index : undefined;
+            const cached = cacheKey ? cache.get(cacheKey) : undefined;
+            if (cached) {
+                try {
+                    await access(cached.media.path, constants.R_OK);
+                    result.media.push(cached.media);
+                    continue;
+                } catch { cache.delete(cacheKey!); }
+            }
             let acquired = false;
             let phase = 'download';
             try {
@@ -48,7 +61,12 @@ export function createInboundImageStager(deps: Dependencies = { fetch: fetchRemo
                 if (!mime || !imageMimes.has(mime)) throw new Error('unsupported_image');
                 phase = 'store';
                 const saved = await deps.save(fetched.buffer, mime, 'inbound', INBOUND_IMAGE_LIMITS.bytes);
-                result.media.push({ path: saved.path, contentType: mime });
+                const media = { path: saved.path, contentType: mime };
+                result.media.push(media);
+                if (cacheKey) {
+                    if (cache.size >= INBOUND_IMAGE_LIMITS.cacheEntries) cache.delete(cache.keys().next().value!);
+                    cache.set(cacheKey, { expires: Date.now() + INBOUND_IMAGE_LIMITS.cacheTtlMs, media });
+                }
             } catch (error: any) {
                 const known = new Set(['unsafe_url', 'busy', 'unsupported_image', 'max_bytes', 'http_error', 'fetch_failed']);
                 const code = phase === 'store' ? 'store_failed' : known.has(error?.code) ? error.code : known.has(error?.message) ? error.message : 'download_failed';
@@ -64,15 +82,14 @@ export function createInboundImageStager(deps: Dependencies = { fetch: fetchRemo
         const now = Date.now();
         for (const [key, value] of cache) if (value.expires <= now) cache.delete(key);
         const key = event.message_id == null ? undefined : createHash('sha256').update(JSON.stringify([event.self_id, event.message_type, event.group_id, event.user_id, event.message_id, urls])).digest('hex');
-        let entry = key ? cache.get(key) : undefined;
-        if (!entry) {
-            entry = { expires: now + INBOUND_IMAGE_LIMITS.cacheTtlMs, promise: stage(urls) };
-            if (key) {
-                if (cache.size >= INBOUND_IMAGE_LIMITS.cacheEntries) cache.delete(cache.keys().next().value!);
-                cache.set(key, entry);
-            }
+        let pending = key ? inflight.get(key) : undefined;
+        if (!pending) {
+            pending = stage(urls, key);
+            if (key) inflight.set(key, pending);
         }
-        const result = await entry.promise;
+        let result: Result;
+        try { result = await pending; }
+        finally { if (key && inflight.get(key) === pending) inflight.delete(key); }
         return { payload: buildAgentMediaPayload(result.media), failures: result.failures };
     };
 }
