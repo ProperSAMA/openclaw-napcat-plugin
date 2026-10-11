@@ -1,3 +1,4 @@
+import { redactInboundMediaText, stageInboundImages } from "./inboundMedia.js";
 import { readWebhookBody, WebhookBodyError } from "./webhookBody.js";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -517,7 +518,7 @@ async function logInboundMessage(body: any, config: any): Promise<void> {
         user_id: body.user_id,
         group_id: body.group_id,
         message_id: body.message_id,
-        raw_message: body.raw_message || "",
+        raw_message: redactInboundMediaText(String(body.raw_message || "")),
         sender: body.sender || {},
     }) + "\n";
 
@@ -532,7 +533,7 @@ async function logInboundParseFailure(rawBody: string, config: any): Promise<voi
     const line = JSON.stringify({
         ts: new Date().toISOString(),
         kind: "parse_error",
-        raw_body: rawBody.slice(0, 2048),
+        raw_body: "[omitted: malformed inbound payload]",
         truncated: rawBody.length > 2048,
     }) + "\n";
     await mkdir(dirname(filePath), { recursive: true });
@@ -550,7 +551,7 @@ function extractNapCatEvents(body: any): any[] {
     return [];
 }
 
-async function processNapCatEvent(event: any, baseConfig: any): Promise<void> {
+async function processNapCatEvent(event: any, baseConfig: any, stageImages = stageInboundImages): Promise<void> {
     // Heartbeat / Lifecycle
     if (event.post_type === "meta_event") {
         return;
@@ -574,8 +575,8 @@ async function processNapCatEvent(event: any, baseConfig: any): Promise<void> {
         if (!/^\d+$/.test(senderId)) {
             console.warn(`[NapCat] WARNING: user_id is not numeric: ${senderId}`);
         }
-        const rawText = event.raw_message || "";
-        let text = await buildInboundMessageText(event, config);
+        const rawText = redactInboundMediaText(String(event.raw_message || ""));
+        let text = redactInboundMediaText(await buildInboundMessageText(event, config));
 
         // Get allowUsers from config
         const allowUsers = config.allowUsers || [];
@@ -693,6 +694,12 @@ async function processNapCatEvent(event: any, baseConfig: any): Promise<void> {
             return;
         }
 
+        const inboundImages = await stageImages(event);
+        if (inboundImages.failures.length) {
+            text += "\n[图片附件不可用: " + inboundImages.failures.join(", ") + "]";
+            console.warn("[NapCat] Inbound image staging: " + inboundImages.failures.join(", "));
+        }
+
         const routeAgentId = String(route.agentId || "").trim().toLowerCase();
         const ackReaction = resolveAckReaction(cfg, effectiveAgentId, {
             channel: "napcat",
@@ -741,6 +748,7 @@ async function processNapCatEvent(event: any, baseConfig: any): Promise<void> {
 
         // Build ctxPayload using runtime methods
         const ctxPayload = {
+            ...inboundImages.payload,
             Body: text,
             BodyForAgent: bodyForAgent,
             RawBody: rawText,
@@ -941,7 +949,7 @@ async function processNapCatEvent(event: any, baseConfig: any): Promise<void> {
 
 }
 
-export async function handleNapCatWebhook(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+export async function handleNapCatWebhook(req: IncomingMessage, res: ServerResponse, stageImages = stageInboundImages): Promise<boolean> {
     const url = req.url || "";
     const method = req.method || "UNKNOWN";
     const pathname = new URL(url, "http://127.0.0.1").pathname;
@@ -988,7 +996,7 @@ export async function handleNapCatWebhook(req: IncomingMessage, res: ServerRespo
         let failedEvents = 0;
         for (const event of events) {
             try {
-                await processNapCatEvent(event, baseConfig);
+                await processNapCatEvent(event, baseConfig, stageImages);
             } catch (error) {
                 failedEvents += 1;
                 console.error("[NapCat] Event processing failed (acknowledged to avoid replaying the batch):", error);
