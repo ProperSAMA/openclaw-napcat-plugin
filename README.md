@@ -571,6 +571,11 @@ MIT License
 
 图片和语音在 OpenClaw 侧经过 SSRF、目录、类型和 25 MiB 大小检查后，以 Base64 发送给 NapCat；失败时不会退回未经检查的原始地址。远程媒体禁止内网地址及重定向到内网，具有读取超时。本地媒体优先遵守宿主传入的读取权限；未传入时仅允许 `mediaProxyAllowedRoots` / `voiceBasePath`。这些限制也适用于未启用媒体代理的部署。
 
+### 1.0.15 升级说明
+
+- 修复 OpenClaw 2026.10.5 下 NapCat 插件因 `openclaw/plugin-sdk/infra-runtime` 已移除而无法加载的问题。
+- 本地媒体读取改用官方 `openclaw/plugin-sdk/file-access-runtime` 入口，继续使用相同的安全读取函数，保留目录、符号链接和大小限制；仍兼容最低支持版本 OpenClaw 2026.8.2。
+
 ### 1.0.14 升级说明
 
 - 入站图片从文字占位符升级为原生视觉附件：消息通过签名、权限和路由检查后，安全下载顶层 `image` / `mface`，经 OpenClaw 官方 SDK 托管存储后随文本派发，支持单图及多图。
