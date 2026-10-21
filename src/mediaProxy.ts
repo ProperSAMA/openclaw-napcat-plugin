@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, resolve } from "node:path";
-import { readLocalFileFromRoots } from "openclaw/plugin-sdk/infra-runtime";
+import { readLocalFileFromRoots } from "openclaw/plugin-sdk/file-access-runtime";
 import { detectMime, kindFromMime, readResponseWithLimit } from "openclaw/plugin-sdk/media-runtime";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 
