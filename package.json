@@ -41,9 +41,9 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^22.15.3",
-    "openclaw": "2026.10.8",
-    "typescript": "^5.8.3"
+    "@types/node": "^26.6.6",
+    "openclaw": "2026.10.9",
+    "typescript": "^7.0.2"
   },
   "openclaw": {
     "extensions": [
